@@ -1,0 +1,82 @@
+{
+  "engine": "spark",
+  "version": "3.5.9",
+  "total_rows": 46908364,
+  "master": "local[4]",
+  "driver_memory": "2500m",
+  "method": "warmup x1 + timed x2 (best)",
+  "queries": [
+    {
+      "qid": "Q1",
+      "desc": "Q1 真实列扫描 SUM(price)",
+      "rows": 1,
+      "cold_ms": 925.0,
+      "best_ms": 852.2,
+      "avg_ms": 863.4
+    },
+    {
+      "qid": "Q1m",
+      "desc": "Q1m COUNT(*)",
+      "rows": 1,
+      "cold_ms": 259.9,
+      "best_ms": 257.5,
+      "avg_ms": 262.1
+    },
+    {
+      "qid": "Q2",
+      "desc": "Q2 分区裁剪（单天 COUNT）",
+      "rows": 1,
+      "cold_ms": 83.1,
+      "best_ms": 77.8,
+      "avg_ms": 80.3
+    },
+    {
+      "qid": "Q3",
+      "desc": "Q3 小基数分组（event_type）",
+      "rows": 3,
+      "cold_ms": 1065.3,
+      "best_ms": 980.0,
+      "avg_ms": 983.0
+    },
+    {
+      "qid": "Q4",
+      "desc": "Q4 按日聚合 GMV（34 组）",
+      "rows": 34,
+      "cold_ms": 1018.2,
+      "best_ms": 990.5,
+      "avg_ms": 991.5
+    },
+    {
+      "qid": "Q5",
+      "desc": "Q5 UV 精确去重（全量 user_id）",
+      "rows": 1,
+      "cold_ms": 4090.6,
+      "best_ms": 4021.6,
+      "avg_ms": 4043.9
+    },
+    {
+      "qid": "Q6",
+      "desc": "Q6 大基数分组（product_id）",
+      "rows": 169651,
+      "cold_ms": 2736.5,
+      "best_ms": 2694.5,
+      "avg_ms": 2712.6
+    },
+    {
+      "qid": "Q7",
+      "desc": "Q7 漏斗 3 层 UV（单天）",
+      "rows": 1,
+      "cold_ms": 245.7,
+      "best_ms": 213.6,
+      "avg_ms": 215.9
+    },
+    {
+      "qid": "Q9",
+      "desc": "Q9 购买明细按用户分组（37 万组）",
+      "rows": 373611,
+      "cold_ms": 3356.3,
+      "best_ms": 3486.6,
+      "avg_ms": 3769.7
+    }
+  ]
+}
