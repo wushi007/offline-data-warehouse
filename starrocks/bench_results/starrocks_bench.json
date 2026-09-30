@@ -1,0 +1,110 @@
+{
+  "engine": "starrocks",
+  "version": "8.0.33",
+  "total_rows": 46908364,
+  "data_mb": 2353.1,
+  "method": "warmup x1 + timed x3 (best/avg)",
+  "queries": [
+    {
+      "qid": "Q1",
+      "desc": "真实列扫描 SUM(price)",
+      "type": "scan",
+      "rows": 1,
+      "cold_ms": 72.8,
+      "best_ms": 71.1,
+      "avg_ms": 75.9,
+      "rows_per_sec": 659751955,
+      "mb_per_sec": 5033.5
+    },
+    {
+      "qid": "Q1m",
+      "desc": "COUNT(*)（元数据优化，不扫描）",
+      "type": "meta",
+      "rows": 1,
+      "cold_ms": 3.2,
+      "best_ms": 2.0,
+      "avg_ms": 2.2
+    },
+    {
+      "qid": "Q2",
+      "desc": "分区裁剪（单天 COUNT）",
+      "type": "agg",
+      "rows": 1,
+      "cold_ms": 6.8,
+      "best_ms": 7.4,
+      "avg_ms": 8.1
+    },
+    {
+      "qid": "Q3",
+      "desc": "小基数分组（event_type）",
+      "type": "agg",
+      "rows": 3,
+      "cold_ms": 307.9,
+      "best_ms": 272.7,
+      "avg_ms": 293.7
+    },
+    {
+      "qid": "Q4",
+      "desc": "按日聚合 GMV（34 组）",
+      "type": "agg",
+      "rows": 34,
+      "cold_ms": 334.9,
+      "best_ms": 224.0,
+      "avg_ms": 251.3
+    },
+    {
+      "qid": "Q5",
+      "desc": "UV 精确去重（全量 user_id）",
+      "type": "agg",
+      "rows": 1,
+      "cold_ms": 376.7,
+      "best_ms": 356.5,
+      "avg_ms": 364.5
+    },
+    {
+      "qid": "Q6",
+      "desc": "大基数分组（product_id）",
+      "type": "agg",
+      "rows": 169651,
+      "cold_ms": 1217.7,
+      "best_ms": 1254.3,
+      "avg_ms": 1262.9
+    },
+    {
+      "qid": "Q7",
+      "desc": "漏斗 3 层 UV（单天）",
+      "type": "agg",
+      "rows": 1,
+      "cold_ms": 44.6,
+      "best_ms": 43.9,
+      "avg_ms": 44.9
+    },
+    {
+      "qid": "Q8",
+      "desc": "JOIN 热榜×类目 + 排序 LIMIT",
+      "type": "agg",
+      "rows": 100,
+      "cold_ms": 16.8,
+      "best_ms": 16.7,
+      "avg_ms": 20.6
+    },
+    {
+      "qid": "Q9",
+      "desc": "购买明细按用户分组（37 万组）",
+      "type": "agg",
+      "rows": 373611,
+      "cold_ms": 2051.6,
+      "best_ms": 2012.3,
+      "avg_ms": 2049.7
+    },
+    {
+      "qid": "Q10",
+      "desc": "窗口函数排名（热榜 Top100 模式）",
+      "type": "agg",
+      "rows": 3400,
+      "cold_ms": 85.7,
+      "best_ms": 80.9,
+      "avg_ms": 85.3
+    }
+  ]
+}
