@@ -122,8 +122,9 @@ hdfs dfs -put 2019-Oct.csv /home/lst/hadoop-data/eCommerce_behavior/
 ./run.sh check --start 2019-10-01 --end 2019-10-31
 ```
 
-> 需要按你的环境调整的只有两处：`config/config.py` 里的 HDFS 根路径，
-> 以及 venv 位置（`run.sh` 会自动探测，探测不到时用 `PYTHON=/path/to/python ./run.sh ...`）。
+> 需要按你的环境调整的只有一处：`config/config.py` 里的 HDFS 数据路径。
+> Java / Spark / Hadoop / venv 的位置由 `run.sh` 自动探测（探测不到时用
+> `SPARK_HOME=... PYTHON=... ./run.sh ...` 显式指定）。
 > 详细步骤与常见报错见 [从零跑通](docs/GETTING_STARTED.md)。
 
 ### 常用命令

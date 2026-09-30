@@ -175,9 +175,9 @@ wsl -d Ubuntu-22.04 -- bash -c 'sudo -n chown -R lst:lst ~/ecom-warehouse'
 ## 七、当前状态
 
 - [x] 首次推送完成，远端 `offline-data-warehouse` 已是最新
-- [x] 确认新流程顺手后，可删备份 `~/my-second-project-add.bak`（800K）
-- [ ] 仓库若设为 Public，可考虑把 `scheduler/incremental_warehouse_dag.py` 里的
-      本机绝对路径（`SPARK_HOME`、`HADOOP_HOME`、`PROJECT_ROOT`）改成可配置项
+- [x] `scheduler/incremental_warehouse_dag.py`、`run.sh` 的本机绝对路径
+      （`SPARK_HOME` / `HADOOP_HOME` / `PROJECT_ROOT`）已改为自动探测 + 环境变量覆盖
+- [ ] 确认新流程顺手后，可删备份 `~/my-second-project-add.bak`（800K）
 
 ---
 
