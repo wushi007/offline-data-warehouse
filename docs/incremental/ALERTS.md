@@ -18,7 +18,7 @@
 | 通道 | 默认 | 依赖 | 位置 / 开关 |
 |---|---|---|---|
 | ① 本地台账 | ✅ 开 | 无 | `scheduler/alert_records/alerts-YYYY-MM-DD.jsonl`（结构化，可 `jq`）—— **按天一个文件，放在项目内** |
-| ② Windows 告警文件 | ✅ 开 | 无 | `/mnt/c/Users/lst/Documents/数仓告警.txt`（打开就能看） |
+| ② Windows 告警文件 | ✅ 开 | 无 | `/mnt/c/Users/<用户名>/Documents/数仓告警.txt`（打开就能看；目录不存在时自动跳过，可用 `DW_ALERT_WIN_FILE` 覆盖） |
 | ③ 桌面弹窗 | best-effort | 装了 BurntToast 才有 | 没装则**静默跳过**（刻意不用阻塞式 MessageBox） |
 | ④ HTTP Webhook | 靠环境变量 | `DW_ALERT_WEBHOOK` | 企业微信/钉钉/飞书群机器人 → **手机推送，唯一真正"响"的通道** |
 | ⑤ 邮件 SMTP | 靠环境变量 | `DW_ALERT_SMTP_HOST` / `_PORT` / `_USER` / `_PASS` / `_TO`（都设了才启用） | — |

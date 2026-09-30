@@ -18,7 +18,15 @@ import pymysql
 SR_FE = (os.environ.get("SR_HOST", "127.0.0.1"), int(os.environ.get("SR_PORT", "9030")))
 SR_USER, SR_PASS = os.environ.get("SR_USER", "root"), os.environ.get("SR_PASSWORD", "")
 DB = "dwd"
-DEFAULT_OUT = Path("/mnt/c/Users/lst/Documents/starrocks_ads")
+# 默认输出目录：优先环境变量；WSL 下默认写到 Windows 的 Documents（Power BI 可直接打开），
+# 非 WSL 环境则退回当前目录下的 starrocks_ads/
+_WIN_DOCS = Path("/mnt/c/Users/{}".format(os.environ.get("USER", "user"))) / "Documents"
+DEFAULT_OUT = Path(
+    os.environ.get(
+        "DW_EXPORT_DIR",
+        str(_WIN_DOCS / "starrocks_ads") if _WIN_DOCS.parent.exists() else "starrocks_ads",
+    )
+)
 
 # (表名, 中文说明)
 TABLES = [
