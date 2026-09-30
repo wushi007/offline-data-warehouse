@@ -4,6 +4,9 @@
 数据集（2019-Oct / 2019-Nov，约 4,700 万行行为日志）构建的**离线数仓**，覆盖 **ODS → DWD → DIM → DWS → ADS** 完整五层，
 31 天数据全链路跑通并通过跨层对账。
 
+> **第一次看这个项目？** 想跑起来 → [从零跑通](docs/GETTING_STARTED.md)；
+> 想懂代码 → [代码解析](docs/CODE_GUIDE.md)。
+
 ## 项目亮点
 
 - **一表一文件**：29 个 ETL 脚本按层组织（`etl/<层>/<表>.py`），每张表都能独立运行、独立重试，定位问题不用读整条链路
@@ -146,6 +149,9 @@ hdfs dfs -put 2019-Oct.csv /home/lst/hadoop-data/eCommerce_behavior/
 │   └── alert_records/                 # 告警台账（运行时产物，不入库）
 ├── starrocks/               # StarRocks 性能基准与 ADS 导出
 ├── docs/
+│   ├── GETTING_STARTED.md  # 从零跑通：配置 → 建表 → 跑数 → 验证
+│   ├── CODE_GUIDE.md       # 代码解析：架构 / 各层实现 / 设计取舍
+│   ├── WORKFLOW.md         # 日常操作手册
 │   ├── incremental/        # 本次建设：构建记录 / 25 个坑复盘 / 告警机制
 │   └── legacy/             # 旧实现：数据字典 / 性能基准 / 踩坑
 └── interview/              # 面试问答（部分路径已失效，待重新对齐）
@@ -155,9 +161,11 @@ hdfs dfs -put 2019-Oct.csv /home/lst/hadoop-data/eCommerce_behavior/
 
 | 文档 | 内容 |
 |---|---|
-| [docs/README.md](docs/README.md) | 文档索引：区分两代实现 |
-| [docs/incremental/WAREHOUSE_BUILD.md](docs/incremental/WAREHOUSE_BUILD.md) | **构建记录**：19 张表清单、分层依赖、SCD2 设计、幂等机制、对账结果、交叉验证 |
-| [docs/incremental/PITFALLS.md](docs/incremental/PITFALLS.md) | **25 个坑复盘**：现象 → 根因 → 修法（数据正确性 / 元数据一致性 / Airflow 与环境 / 资源性能） |
+| **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** | **从零跑通**：环境要求、依赖安装、启 HDFS、改配置、建表、跑数据、验证结果、11 个常见报错 |
+| **[docs/CODE_GUIDE.md](docs/CODE_GUIDE.md)** | **代码解析**：五层架构、每层实现细节、SCD2 算法、幂等机制、6 个关键设计决策 |
+| [docs/WORKFLOW.md](docs/WORKFLOW.md) | 日常操作手册 |
+| [docs/incremental/WAREHOUSE_BUILD.md](docs/incremental/WAREHOUSE_BUILD.md) | **构建记录**：19 张表清单、分层依赖、SCD2 设计、对账结果、交叉验证 |
+| [docs/incremental/PITFALLS.md](docs/incremental/PITFALLS.md) | **25 个坑复盘**：现象 → 根因 → 修法 |
 | [docs/incremental/ALERTS.md](docs/incremental/ALERTS.md) | 告警机制：4+1 通道、事件分级、台账字段 |
 | [docs/legacy/DWS_ADS_TABLES.md](docs/legacy/DWS_ADS_TABLES.md) | DWS/ADS 数据字典（34 天实测数字） |
 | [docs/legacy/PERFORMANCE_BENCHMARK.md](docs/legacy/PERFORMANCE_BENCHMARK.md) | StarRocks vs Spark 查询性能基准 |

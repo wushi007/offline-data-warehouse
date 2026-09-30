@@ -5,16 +5,25 @@
 ```
 docs/
 ├── README.md          ← 本文件：索引 + 两代的区别
+├── GETTING_STARTED.md ← 从零跑通：环境配置 → 建表 → 跑数 → 验证
+├── CODE_GUIDE.md      ← 代码解析：架构、各层实现、关键设计决策
 ├── WORKFLOW.md        ← 日常操作手册（改代码 / 跑任务 / 推送）
 ├── incremental/       本次建设（增量数仓：Spark + Airflow，2019-10/11）
 └── legacy/            旧实现（批量数仓：Spark + StarRocks，2019-10/11）
 ```
 
-## 先读这篇
+## 先读这两篇
+
+| 文档 | 什么时候看 |
+|---|---|
+| [GETTING_STARTED.md](GETTING_STARTED.md) | **第一次拿到代码**：环境准备、依赖安装、改配置、建表、跑通、查结果、常见报错 |
+| [CODE_GUIDE.md](CODE_GUIDE.md) | **想搞懂代码**：五层架构、每层在做什么、SCD2 算法、幂等机制、关键设计取舍 |
+
+## 其余文档
 
 | 文档 | 内容 |
 |---|---|
-| [WORKFLOW.md](WORKFLOW.md) | **日常怎么干活**：三个路径的分工、提交推送流程、跑任务的命令、Airflow 链路、环境启停 |
+| [WORKFLOW.md](WORKFLOW.md) | **日常怎么干活**：三个路径的分工、提交推送流程、跑任务的命令、环境启停 |
 
 ## 怎么区分
 
