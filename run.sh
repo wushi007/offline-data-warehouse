@@ -10,8 +10,21 @@ cd "$(dirname "$0")"
 
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 export PATH="$JAVA_HOME/bin:$PATH"
-# 解释器：默认用仓库内 .venv；也可用 PYTHON=/path/to/python ./run.sh ... 覆盖
-PY="${PYTHON:-$PWD/.venv/bin/python}"
+
+# 解释器解析顺序：PYTHON 环境变量 > 仓库内 .venv > 常见的同级 venv > 系统 python3
+# 可用 PYTHON=/path/to/python ./run.sh ... 显式指定
+resolve_python() {
+    if [ -n "${PYTHON:-}" ]; then echo "$PYTHON"; return; fi
+    local c
+    for c in "$PWD/.venv/bin/python" \
+             "$PWD/../.venv/bin/python" \
+             "/home/lst/my-spark/.venv/bin/python"; do
+        [ -x "$c" ] && { echo "$c"; return; }
+    done
+    echo "python3"
+}
+PY="$(resolve_python)"
+
 # 所有 Spark 调用都过串行闸门：同一时刻只有一个 SparkSession（抢不到锁会排队等待）
 LOCKED=./etl/run_locked.sh
 
