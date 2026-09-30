@@ -84,11 +84,13 @@ cd ~/ecom-warehouse
 ./run.sh ads --dt 2019-11-01
 ```
 
-`run.sh` 里的解释器默认取仓库内 `.venv/bin/python`。你的 venv 在 `~/my-spark/.venv`，
-所以要这样跑（或把 venv 软链过来）：
+`run.sh` 会自动找解释器，顺序是：`PYTHON` 环境变量 → 仓库内 `.venv` → 同级 `.venv` →
+`~/my-spark/.venv`。你的 venv 在 `~/my-spark/.venv`，**会自动匹配到，不用额外传参**。
+
+需要指定别的解释器时才用：
 
 ```bash
-PYTHON=~/my-spark/.venv/bin/python ./run.sh build --dt 2019-11-01
+PYTHON=/path/to/python ./run.sh build --dt 2019-11-01
 ```
 
 **环境启停**（注意这两个在 my-spark，不在 ecom-warehouse）：
