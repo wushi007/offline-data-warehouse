@@ -84,39 +84,6 @@ LOCKED=./etl/run_locked.sh
 
 run() { $LOCKED "$PY" "$@"; }
 
-# ---------------------------------------------------------------
-# 纯 SQL 通道：./run.sh sql <文件> [--dt D]
-#
-# 为什么需要这一层：spark-defaults.conf 里**只有** master / driver.memory /
-# Hive metastore，而下面这几项会话配置原本只写在 etl/utils.py 的 get_spark() 里
-# —— 那是 Python 通道的东西，spark-sql 一无所知。缺了它们，同一条 SQL 在两条
-# 通道上会算出不同结果（详见 sql/README.md 的「配置缺口」）：
-#   · session.timeZone=UTC            不设 → 退回系统时区(+8)，
-#                                     TO_DATE(event_time) 会把每天 16:00-23:59
-#                                     UTC 的事件算到次日（实测 2019-10-01 分区
-#                                     多出 337,080 行「错位」）
-#   · partitionOverwriteMode=dynamic  不设 = STATIC，增量 INSERT OVERWRITE
-#                                     （不带 PARTITION 子句那种）会覆盖整张表
-#   · fs.defaultFS                    不设 → parquet 路径按本地文件系统解析
-# ★ 改动 etl/utils.py 的 get_spark() 时必须同步这里，两个通道要保持一致。
-# ---------------------------------------------------------------
-HDFS_ROOT="$(sed -n 's/^HDFS_ROOT *= *"\(.*\)"/\1/p' config/config.py 2>/dev/null | head -1)"
-[ -n "$HDFS_ROOT" ] || HDFS_ROOT="hdfs://localhost:8020"
-
-SPARK_SQL_BIN=""    # 实际路径在 sql) 分支里解析，见那里对「裸 spark-sql」的警告
-
-SQL_CONF=(
-    --conf "spark.sql.session.timeZone=UTC"
-    --conf "spark.sql.sources.partitionOverwriteMode=dynamic"
-    --conf "spark.hadoop.fs.defaultFS=$HDFS_ROOT"
-    --conf "spark.master=local[6]"
-    --conf "spark.driver.memory=4g"
-    --conf "spark.sql.shuffle.partitions=100"
-)
-
-# SQL 同样过串行闸门 —— spark-sql 起的也是完整 SparkSession，一样吃内存
-run_sql() { $LOCKED "$SPARK_SQL_BIN" "${SQL_CONF[@]}" "$@"; }
-
 usage() {
     cat <<'EOF'
 用法: ./run.sh <命令> [参数]
@@ -144,11 +111,6 @@ ODS 接入
   dim    --dt D               etl/dim/dim_user.py（增量）| --start/--end（全量重建）
   ads    --dt D               etl/ads/ads_trade_daily.py
   table <相对路径> [参数]      跑任意单表，如: ./run.sh table etl/dim/dim_category.py --dt 2019-11-01
-
-纯 SQL（直接跑 .sql 文件，不经过 Python）
-  sql <sql文件> --dt D        跑 sql/ 下的 SQL 文件，如:
-                                ./run.sh sql sql/dqc/dwd_event_fact_dqc.sql --dt 2019-10-01
-                              自动把 --dt 转成 --hivevar dt=...，并带上必需的会话配置
 EOF
 }
 
@@ -182,54 +144,6 @@ case "${1:-}" in
         S="${1:?用法: ./run.sh table etl/<层>/<表>.py [参数]}"
         shift || true
         run "$S" "$@"
-        ;;
-
-    # ---- 纯 SQL 通道 ----
-    # --dt D 会被转成 --hivevar dt=D（SQL 里用 ${dt} 引用）；
-    # ods_path 由这里从 config/config.py 读出来注入，避免同一个路径
-    # 在 config.py 和 .sql 文件里各写一份；
-    # 其余参数原样透传给 spark-sql（如额外的 --hivevar、--conf）。
-    sql)
-        shift
-        S="${1:?用法: ./run.sh sql <sql文件> [--dt YYYY-MM-DD] [其它 spark-sql 参数]}"
-        shift || true
-        _DT=""
-        _EXTRA=()
-        while [ "$#" -gt 0 ]; do
-            case "$1" in
-                --dt) _DT="${2:?--dt 后面要跟日期，如 --dt 2019-10-01}"; shift 2 ;;
-                *)    _EXTRA+=("$1"); shift ;;
-            esac
-        done
-
-        # ODS 分区根路径：从 config.py 读，保证与 Python 通道同源。
-        # 放在这里而不是文件开头，是为了不拖慢其它子命令。
-        _ODS="$("$PY" -c 'import sys; sys.path.insert(0, "."); from config.config import ODS_PATH; print(ODS_PATH)' 2>/dev/null || true)"
-        if [ -z "$_ODS" ]; then
-            echo "⚠️  读不到 config/config.py 里的 ODS_PATH（$PY 不可用或缺 pyspark）" >&2
-            echo "     用 PYTHON=<项目 venv 下的 python> 指定解释器后重试" >&2
-        fi
-
-        # spark-sql 必须显式用 $SPARK_HOME 下的那一份。
-        # ★ 不要退回裸 `spark-sql`：非交互 shell 里 SPARK_HOME 会被 .bashrc 的
-        #   "not running interactively" 守卫拦掉，裸命令会顺着 PATH 落到
-        #   ~/.local/bin/spark-sql（pip 装 pyspark 时带进来的 3.5.8），
-        #   那份没有 conf/spark-defaults.conf → 没有 Hive metastore →
-        #   报 TABLE_OR_VIEW_NOT_FOUND，看着像「表没建」，其实是找错了 Spark。
-        SPARK_SQL_BIN="${SPARK_HOME:+$SPARK_HOME/bin/spark-sql}"
-        if [ ! -x "${SPARK_SQL_BIN:-}" ]; then
-            {
-                echo "❌ 找不到 spark-sql：SPARK_HOME=${SPARK_HOME:-（未设置）}，其下没有 bin/spark-sql。"
-                echo "   刻意不退回裸 spark-sql —— 那会落到 /usr/local/bin 的另一份 Spark，"
-                echo "   它没有 Hive metastore 配置，查询会报 TABLE_OR_VIEW_NOT_FOUND。"
-                echo "   解决办法：export SPARK_HOME=/你的/spark 安装路径"
-            } >&2
-            exit 1
-        fi
-
-        _HV=(--hivevar "ods_path=$_ODS")
-        if [ -n "$_DT" ]; then _HV+=(--hivevar "dt=$_DT"); fi
-        run_sql "${_HV[@]}" "${_EXTRA[@]}" -f "$S"
         ;;
     *) usage ;;
 esac
