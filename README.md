@@ -139,6 +139,9 @@ hdfs dfs -put 2019-Oct.csv /home/lst/hadoop-data/eCommerce_behavior/
 ./run.sh dwd --dt 2019-11-01
 ./run.sh dim-scd2 --dt 2019-11-01
 ./run.sh table etl/ads/ads_trade_daily.py --dt 2019-11-01
+
+# 纯 SQL（直接跑 .sql 文件，不经过 Python）
+./run.sh sql sql/dqc/dwd_event_fact_dqc.sql --dt 2019-11-01
 ```
 
 ## 数据成果（2019-10-01 ~ 10-31）
@@ -192,6 +195,9 @@ hdfs dfs -put 2019-Oct.csv /home/lst/hadoop-data/eCommerce_behavior/
 │   ├── alerts.py                      # 任务告警（4+1 通道）
 │   └── alert_records/                 # 告警台账（运行时产物，不入库）
 ├── starrocks/               # StarRocks 性能基准与 ADS 导出
+├── sql/                     # 纯 SQL 通道：能一条 SQL 表达完的任务写成 .sql，
+│   ├── README.md            #   由 spark-sql 执行（配置缺口 / 机制 / 适用范围）
+│   └── dqc/                 # DWD 质量闸门（7 项检查，纯 SQL 判定）
 ├── docs/
 │   ├── GETTING_STARTED.md  # 从零跑通：配置 → 建表 → 跑数 → 验证
 │   ├── CODE_GUIDE.md       # 代码解析：架构 / 各层实现 / 设计取舍
@@ -207,6 +213,7 @@ hdfs dfs -put 2019-Oct.csv /home/lst/hadoop-data/eCommerce_behavior/
 | **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** | **从零跑通**：环境要求、依赖安装、启 HDFS、改配置、建表、跑数据、验证结果、11 个常见报错 |
 | **[docs/CODE_GUIDE.md](docs/CODE_GUIDE.md)** | **代码解析**：五层架构、每层实现细节、SCD2 算法、幂等机制、6 个关键设计决策 |
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | 日常操作手册 |
+| [sql/README.md](sql/README.md) | **纯 SQL 通道**：spark-sql / spark-submit / beeline 的取舍、参数化与闸门机制、会话配置缺口、适用范围 |
 | [docs/incremental/WAREHOUSE_BUILD.md](docs/incremental/WAREHOUSE_BUILD.md) | **构建记录**：19 张表清单、分层依赖、SCD2 设计、对账结果、交叉验证 |
 | [docs/incremental/ALERTS.md](docs/incremental/ALERTS.md) | 告警机制：4+1 通道、事件分级、台账字段 |
 | [docs/legacy/DWS_ADS_TABLES.md](docs/legacy/DWS_ADS_TABLES.md) | DWS/ADS 数据字典（34 天实测数字） |
