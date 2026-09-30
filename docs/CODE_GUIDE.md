@@ -319,14 +319,38 @@ INSERT OVERWRITE TABLE dwd.dwd_event_fact PARTITION (event_date = '{dt}')
 
 ### `etl/dwd/dwd_event_fact_dqc.py` —— 质量闸门
 
-六项检查，逐日跑，**失败即阻断 Airflow 下游**：
+七项检查，逐日跑，**失败即阻断 Airflow 下游**：
 
-1. 去重键唯一性
-2. 核心字段空值
-3. 枚举越界
-4. `price` 负值
-5. **分区与事件 UTC 日期一致性**（防止时区错误导致串分区）
-6. 账目对平（ODS = 干净 + 脏 + 去重）
+| # | 检查 | 失败码 |
+|---|---|---|
+| 1 | 账对平（DWD + 脏 ≤ ODS，多了说明写重） | `count_overflow` |
+| 2 | 分区非空 | `empty_partition` |
+| 3 | 去重键唯一性 | `dup_key` |
+| 4 | 核心字段空值 | `null_core_field` |
+| 5 | 枚举越界 | `bad_event_type` |
+| 6 | `price` 负值 | `negative_price` |
+| 7 | **分区与事件 UTC 日期一致性**（防止时区错误导致串分区） | `timezone_offset` |
+
+**实现风格：判定逻辑全部在一条 SQL 里。** 用 `UNION ALL` 让每个检查项输出一行
+`(seq, code, item, status, detail)`，`CASE WHEN` 直接产出 `PASS`/`BLOCK`；
+Python 只负责「建临时视图 → 跑 SQL → 打印 → 依 `status` 定退出码」。
+这样加检查项 = 加一个 `UNION ALL` 分支，判定口径集中一处，SQL 也能单独拿到
+beeline / Spark SQL 里跑。
+
+**三个必须注意的实现约束**（写在文件头注释里）：
+
+1. **`SUM` 必须包 `COALESCE(..., 0)`。** 空分区时 `SUM` 返回 `NULL`，而
+   `NULL = 0` 结果是 `NULL`（既不真也不假）→ `CASE WHEN` 落到 `ELSE`，
+   把空分区误判成 `BLOCK`。
+   > 附带说明：改写成纯 SQL 之前，原 Python 版在**打印**上就踩过这个坑 ——
+   > `None == 0` 为假，于是空分区时会打出 4 个误导性的 ❌。它的 `blocked`
+   > 列表没被污染（`if None:` 是假值），但输出会让人误以为那 4 项也失败了。
+2. **ODS 行数走临时视图（按 HDFS 路径读），不要改成表读。** 表读依赖
+   `MSCK REPAIR` 成功，而 ODS 导入里的 MSCK 是 `try/except` 只警告 ——
+   一旦静默失败会读到 0 行，误报「分区为空」阻断下游。
+3. **时间戳用 `DATE_FORMAT` 转字符串再取。** 直接 `collect` 时间戳会经 py4j
+   按 **Python 进程本地时区**渲染（+8），打印成 `08:00 ~ 次日 07:59`，
+   看着像分区混了次日数据 —— 纯误读来源，数据本身没错。
 
 ---
 
