@@ -1,0 +1,52 @@
+# 文档索引
+
+本目录按**两代实现**分成两个文件夹 —— 读任何一篇前，先确认它讲的是哪一代。
+
+```
+docs/
+├── README.md          ← 本文件：索引 + 两代的区别
+├── incremental/       本次建设（增量数仓：Spark + Airflow，2019-10/11）
+└── legacy/            旧实现（批量数仓：Spark + StarRocks，2019-10/11）
+```
+
+## 怎么区分
+
+| | `incremental/`（本次，2026-09-29 起） | `legacy/`（旧，2026-08 及更早） |
+|---|---|---|
+| 代码 | `etl/` 下**一表一文件**、每层一个文件夹 | 多张表挤在一个脚本里（如 `build_dims.py`、`dws_aggregate.py`）——**这些文件已被删除或取代** |
+| 调度 | Airflow（`scheduler/incremental_warehouse_dag.py`，一表一 task） | 手动 / `run.sh` |
+| 引擎 | Spark（HDFS + Hive metastore） | Spark + **StarRocks** 双引擎 |
+| 存储 | Hive 外部表，19 张（5 层） | 部分表随 2026-09-29 数仓清空被 DROP |
+| 数据区间 | 2019-10-01 ~ 2019-11-04（已处理） | 2019-10-01 ~ 2019-11-03（34 天） |
+
+⚠️ `legacy/` 里的文档**仍然有价值**：它记录了被删实现的**历史数字**，本次重建就是拿它做交叉验证
+（11-01/02/03 的 GMV 逐项对得上）。只是里面的**代码路径引用大多已失效**，别照着去找文件。
+
+## `incremental/` —— 本次建设
+
+| 文档 | 内容 |
+|---|---|
+| [WAREHOUSE_BUILD.md](incremental/WAREHOUSE_BUILD.md) | 建设过程与结果：19 张表清单、分层依赖、SCD2 设计、幂等机制、跨层对账、与旧文档的交叉验证、常用命令 |
+| [PITFALLS.md](incremental/PITFALLS.md) | **本轮 25 个坑**复盘（数据正确性 / 元数据一致性 / Airflow 与环境 / 资源性能 / 方法论），每条含现象→根因→修法 |
+| [ALERTS.md](incremental/ALERTS.md) | **任务告警机制**：4+1 通道、事件分级、触发点、台账字段与真实样例、怎么启手机推送、已知局限 |
+
+## `legacy/` —— 旧实现
+
+| 文档 | 内容 | 注意 |
+|---|---|---|
+| [DWS_ADS_TABLES.md](legacy/DWS_ADS_TABLES.md) | DWS/ADS 层数据字典（34 天实测数字） | 表结构口径**沿用至今**；代码路径已失效 |
+| [PERFORMANCE_BENCHMARK.md](legacy/PERFORMANCE_BENCHMARK.md) | StarRocks vs Spark 查询性能基准 | 依赖已停的 StarRocks |
+| [PITFALLS.md](legacy/PITFALLS.md) | 旧项目踩的坑（A1 分区覆盖 / A2 时区 / B 代码实现 / C 性能诊断 / D 工程） | — |
+
+## 不在本目录的相关材料
+
+| 位置 | 说明 |
+|---|---|
+| `../interview/INTERVIEW_ANSWERS.md` | 面试问答（基于旧实现写的，**大量引用已删除的代码路径**，需要重新对齐） |
+| `/home/lst/my-spark/docs/` | **上一级仓库**的文档（`DWD入StarRocks复盘.md` 等），不属于本项目，未纳入本次整理 |
+
+## 待整理
+
+- `interview/INTERVIEW_ANSWERS.md` 里的路径已大量失效（指向 `etl/spark_dims_dws_ads/*`、`optimize/run_bench.py`、
+  `starrocks/create_dim_starrocks.py` 等已删文件），需要按 `incremental/` 的两份文档重新对齐
+- 上游仓库 `docs/` 与本项目 `docs/` 目前各放各的，是否合并待定
