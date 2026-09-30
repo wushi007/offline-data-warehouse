@@ -2,7 +2,7 @@
 
 基于 [Kaggle eCommerce behavior](https://www.kaggle.com/datasets/mkechinov/ecommerce-behavior-data-from-multi-category-store)
 数据集（2019-Oct / 2019-Nov，约 4,700 万行行为日志）构建的**离线数仓**，覆盖 **ODS → DWD → DIM → DWS → ADS** 完整五层，
-31 天数据全链路跑通并通过跨层对账。
+31 天数据全链路跑通并通过跨层对账.!!!!!环境配并没有通用，只可参考配置Spark配置思路，处于电脑仅有16gb内存舒适区，作为演示sparksqldemo
 
 > **第一次看这个项目？** 想跑起来 → [从零跑通](docs/GETTING_STARTED.md)；
 > 想懂代码 → [代码解析](docs/CODE_GUIDE.md)。
