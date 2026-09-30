@@ -210,18 +210,35 @@ vim .env
 
 `.env` 已被 `.gitignore` 忽略，**不会入库**。
 
-### 解释器路径
+### 环境解析
 
-`run.sh` 会自动探测，顺序：
+`run.sh` 启动时会自己把四类路径解析好，通常**什么都不用配**：
 
-```
-PYTHON 环境变量 → ./.venv → ../.venv → ~/my-spark/.venv → python3
-```
+| 变量 | 探测顺序 |
+|---|---|
+| `JAVA_HOME` | 环境变量 → `/usr/lib/jvm/java-17-openjdk-*` → `/usr/lib/jvm/default-java` |
+| `SPARK_HOME` | 环境变量 → `~/apps/spark-*` → `/opt/spark*` → `/usr/local/spark*` |
+| `HADOOP_HOME` | 环境变量 → `~/apps/hadoop-[0-9]*` → `/opt/hadoop*` → `/usr/local/hadoop*` |
+| `HADOOP_CONF_DIR` | 环境变量 → `$HADOOP_HOME/etc/hadoop` |
+| Python 解释器 | `PYTHON` 环境变量 → `./.venv` → `../.venv` → `~/.venv` → `python3` |
 
-需要指定别的解释器时：
+（只取目录、按版本号排序取最新，所以 `spark-*.tgz` 安装包不会被误选。）
+
+**为什么 `SPARK_HOME` 必须解析出来**：pyspark 找不到它时会回退到 venv 里的
+pyspark 包目录，那里**没有 `conf/spark-defaults.conf`** —— 而
+`spark.sql.catalogImplementation=hive` 与 metastore 的 JDBC 连接都写在那，
+后果是建表直接报 `NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT`。
+探测全失败时 `run.sh` 会打印一条带原因和解决方式的告警，不会让你去猜 Spark 的报错。
+
+> 交互式终端里 `.bashrc` 已经导出了这些变量，所以手敲看不出差别；
+> 但脚本 / cron / CI 等**非交互场景不会加载 `.bashrc`**（开头那句
+> "If not running interactively, don't do anything" 会直接 return），
+> 这时就靠 `run.sh` 自己探测兜底。
+
+装在非常规位置时显式指定即可：
 
 ```bash
-PYTHON=/path/to/python ./run.sh build --dt 2019-11-01
+SPARK_HOME=/your/spark PYTHON=/path/to/python ./run.sh build --dt 2019-11-01
 ```
 
 ---

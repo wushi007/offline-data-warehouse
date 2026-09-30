@@ -19,6 +19,51 @@ if [ -n "${JAVA_HOME:-}" ]; then
     export PATH="$JAVA_HOME/bin:$PATH"
 fi
 
+# Spark / Hadoop 目录：决定 Hive metastore 与 catalogImplementation 能否生效
+# ★ 为什么必须解析（不是可有可无）：
+#   pyspark 找不到 SPARK_HOME 时会回退到 venv 里的 pyspark 包目录，那里没有
+#   conf/spark-defaults.conf —— 而 spark.sql.catalogImplementation=hive 与
+#   metastore 的 JDBC 连接都写在那，后果是建表直接报
+#     NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT
+#   交互式终端里 .bashrc 已经导出这些变量，所以手敲看不出来；
+#   但非交互场景（脚本 / cron / CI / 未显式传 env 的调度器）会静默丢 Hive 支持
+#   —— .bashrc 开头那句 "If not running interactively, don't do anything" 就是原因。
+#   探测顺序与 scheduler/incremental_warehouse_dag.py 保持一致。
+resolve_dir() {
+    # $1 = 当前值（环境变量，可能为空或失效）；其余参数 = glob 模式，按顺序探测
+    local cur="$1"; shift
+    if [ -n "$cur" ] && [ -d "$cur" ]; then printf '%s' "$cur"; return 0; fi
+    local pat matches d best
+    for pat in "$@"; do
+        matches="$(compgen -G "$pat" 2>/dev/null || true)"
+        best=""
+        for d in $matches; do
+            [ -d "$d" ] || continue      # 排除 spark-*.tgz 之类的安装包
+            if [ -z "$best" ] || [[ "$d" > "$best" ]]; then best="$d"; fi
+        done
+        if [ -n "$best" ]; then printf '%s' "$best"; return 0; fi
+    done
+    return 1
+}
+
+SPARK_HOME="$(resolve_dir "${SPARK_HOME:-}" "${HOME}/apps/spark-*" "/opt/spark*" "/usr/local/spark*" || true)"
+HADOOP_HOME="$(resolve_dir "${HADOOP_HOME:-}" "${HOME}/apps/hadoop-[0-9]*" "/opt/hadoop*" "/usr/local/hadoop*" || true)"
+[ -n "$SPARK_HOME" ]  && { export SPARK_HOME;  PATH="$SPARK_HOME/bin:$PATH"; }
+[ -n "$HADOOP_HOME" ] && { export HADOOP_HOME; PATH="$HADOOP_HOME/bin:$HADOOP_HOME/sbin:$PATH"; }
+HADOOP_CONF_DIR="${HADOOP_CONF_DIR:-${HADOOP_HOME:+$HADOOP_HOME/etc/hadoop}}"
+[ -n "$HADOOP_CONF_DIR" ] && export HADOOP_CONF_DIR
+export PATH
+
+if [ -z "${SPARK_HOME:-}" ]; then
+    cat >&2 <<'WARN'
+⚠️  未找到 Spark 安装目录（SPARK_HOME 未设置，且探测 ~/apps、/opt、/usr/local 均失败）
+    后果：pyspark 会回退到 venv 内的包目录，读不到 conf/spark-defaults.conf，
+          Hive 支持与 metastore 连接会失效 → 建表报
+          NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT
+    解决：export SPARK_HOME=/你的/spark/安装路径
+WARN
+fi
+
 # 解释器解析顺序：PYTHON 环境变量 > 仓库内 .venv > 同级 .venv > 家目录 .venv > 系统 python3
 # 可用 PYTHON=/path/to/python ./run.sh ... 显式指定
 # 若 venv 在仓库外，推荐在仓库根建软链接：ln -s /path/to/venv .venv
