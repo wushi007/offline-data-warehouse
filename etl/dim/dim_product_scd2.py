@@ -192,7 +192,7 @@ def rebuild(spark, start, end):
 def build_inc(spark, dt):
     """SCD2 单日增量 merge。
 
-    为什么不能一条 SQL 写完（踩过的坑）：Spark 会拦下"目标表同时被读取"的写法——
+    为什么不能一条 SQL 写完：Spark 会拦下"目标表同时被读取"的写法——
     `[UNSUPPORTED_OVERWRITE.TABLE] Can't overwrite the target that is also being read from`。
     把拉链表 cache 成 DataFrame 再建视图**没用**，视图只是别名，分析器照样穿透到表本身。
 

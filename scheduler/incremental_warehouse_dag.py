@@ -52,7 +52,7 @@ HADOOP_HOME = "/home/lst/apps/hadoop-3.4.3"
 HADOOP_CONF_DIR = f"{HADOOP_HOME}/etc/hadoop"
 DATA_START = "2019-10-01"        # 数仓数据起点（RFM/留存这类区间任务要用）
 
-# ★ 为什么 SPARK_HOME / HADOOP_CONF_DIR 必须显式写在这里（踩过的坑）：
+# ★ 为什么 SPARK_HOME / HADOOP_CONF_DIR 必须显式写在这里：
 #   Airflow 的 BashOperator.get_env() 逻辑是——
 #       env = self.env
 #       if env is None: env = os.environ.copy()

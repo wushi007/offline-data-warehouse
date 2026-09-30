@@ -25,7 +25,7 @@ docs/
 |---|---|
 | [WORKFLOW.md](WORKFLOW.md) | **日常怎么干活**：三个路径的分工、提交推送流程、跑任务的命令、环境启停 |
 
-## 怎么区分
+## 怎么区分两代实现
 
 | | `incremental/`（本次，2026-09-29 起） | `legacy/`（旧，2026-08 及更早） |
 |---|---|---|
@@ -43,7 +43,6 @@ docs/
 | 文档 | 内容 |
 |---|---|
 | [WAREHOUSE_BUILD.md](incremental/WAREHOUSE_BUILD.md) | 建设过程与结果：19 张表清单、分层依赖、SCD2 设计、幂等机制、跨层对账、与旧文档的交叉验证、常用命令 |
-| [PITFALLS.md](incremental/PITFALLS.md) | **本轮 25 个坑**复盘（数据正确性 / 元数据一致性 / Airflow 与环境 / 资源性能 / 方法论），每条含现象→根因→修法 |
 | [ALERTS.md](incremental/ALERTS.md) | **任务告警机制**：4+1 通道、事件分级、触发点、台账字段与真实样例、怎么启手机推送、已知局限 |
 
 ## `legacy/` —— 旧实现
@@ -52,17 +51,9 @@ docs/
 |---|---|---|
 | [DWS_ADS_TABLES.md](legacy/DWS_ADS_TABLES.md) | DWS/ADS 层数据字典（34 天实测数字） | 表结构口径**沿用至今**；代码路径已失效 |
 | [PERFORMANCE_BENCHMARK.md](legacy/PERFORMANCE_BENCHMARK.md) | StarRocks vs Spark 查询性能基准 | 依赖已停的 StarRocks |
-| [PITFALLS.md](legacy/PITFALLS.md) | 旧项目踩的坑（A1 分区覆盖 / A2 时区 / B 代码实现 / C 性能诊断 / D 工程） | — |
 
 ## 不在本目录的相关材料
 
 | 位置 | 说明 |
 |---|---|
-| `../interview/INTERVIEW_ANSWERS.md` | 面试问答（基于旧实现写的，**大量引用已删除的代码路径**，需要重新对齐） |
-| `/home/lst/my-spark/docs/` | **上一级仓库**的文档（`DWD入StarRocks复盘.md` 等），不属于本项目，未纳入本次整理 |
-
-## 待整理
-
-- `interview/INTERVIEW_ANSWERS.md` 里的路径已大量失效（指向 `etl/spark_dims_dws_ads/*`、`optimize/run_bench.py`、
-  `starrocks/create_dim_starrocks.py` 等已删文件），需要按 `incremental/` 的两份文档重新对齐
-- 上游仓库 `docs/` 与本项目 `docs/` 目前各放各的，是否合并待定
+| `/home/lst/my-spark/docs/` | **上一级仓库**的文档，不属于本项目，未纳入本次整理 |

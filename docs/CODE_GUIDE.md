@@ -139,7 +139,7 @@ MYSQL = {"password": os.environ.get("DW_MYSQL_PASSWORD", ""), ...}
 
 ### `etl/utils.py` —— 共享工具
 
-四个函数，每个都对应一个踩过的坑：
+四个函数，每个都对应一条非显然的实现约束：
 
 #### `get_spark()` —— 统一 SparkSession
 
@@ -387,10 +387,10 @@ ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY dw_start_date DESC) = 1
 
 **不是**「末次出现日 = 统计窗口末日」。
 
-> 踩过的坑：曾用后者判定，结果 92,844 个商品被判成「没有当前版本」。
-> 根因是**商品中途不再出现 ≠ 属性变更**（缺观测不等于变更）——
-> 那些 10-31 之前就不再出现的商品全被判成非当前。
-> **SCD2 的「当前」是版本序列的属性，不是与统计窗口对齐的属性。**
+> ⚠️ **不能用后者判定。** 商品**中途不再出现 ≠ 属性变更**（缺观测不等于变更），
+> 用「末次出现日 = 窗口末日」会把 10-31 之前就不再出现的商品全部误判为非当前
+> （实测会误判 9 万余个）。
+> **SCD2 的「当前」是版本序列的属性，与统计窗口无关。**
 
 **④ 代理键**：`dim_product_sk` 按 `(product_id, dw_start_date)` 全局编号，
 与业务键解耦。
@@ -560,7 +560,7 @@ exec flock -w "$WAIT" "$LOCK" "$@"
 
 **关键配置**：`max_active_tasks=1` —— 任务间串行，配合 flock 双保险。
 
-**必须显式传 env（踩过的坑）**：
+**必须显式传 env**：
 
 ```python
 # Airflow BashOperator.get_env() 的逻辑是：
@@ -641,13 +641,11 @@ exec flock -w "$WAIT" "$LOCK" "$@"
 拉链需要「变更时刻」，但源数据只有**观测时刻**（用户看到这个商品是什么属性），
 没有**变更时刻**（商品何时被改的）。所以 `dw_start_date` 只能到天。
 
-**这是数据源的边界，不是实现偷懒。** 面试时应主动说明这个限制。
+**这是数据源的边界，不是实现偷懒。**
 
 ---
 
 ## 下一步
 
 - 想知道**怎么跑起来** → [GETTING_STARTED.md](GETTING_STARTED.md)
-- 想知道**踩了哪些坑** → [incremental/PITFALLS.md](incremental/PITFALLS.md)（25 个）
 - 想知道**数据字典与实测数字** → [incremental/WAREHOUSE_BUILD.md](incremental/WAREHOUSE_BUILD.md)
-- 想知道**面试怎么讲** → [../interview/INTERVIEW_ANSWERS.md](../interview/INTERVIEW_ANSWERS.md)

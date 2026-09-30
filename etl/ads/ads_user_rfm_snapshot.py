@@ -65,10 +65,10 @@ SQL = f"""
 def drop_all_partitions(spark):
     """清掉本表**所有已注册分区**（含幽灵分区）。
 
-    为什么不能用 utils.drop_path 删目录（踩过的坑）：
+    为什么不能用 utils.drop_path 删目录：
         这是**分区外部表**。外部表的元数据在 metastore 里，删 HDFS 目录**不会**删掉分区注册，
         于是留下"幽灵分区"——metastore 说有、目录却不存在，查这张表不带分区条件时会报
-        `[PATH_NOT_FOUND]`。反过来 DROP TABLE 不删文件（PITFALLS 里那条）是同一个问题的另一面：
+        `[PATH_NOT_FOUND]`。反过来 DROP TABLE 不删文件是同一个问题的另一面：
         **目录和注册必须一起动**。
         正确做法是让 metastore 自己删分区：ALTER TABLE ... DROP PARTITION。
         （外部表 DROP PARTITION 只清元数据、不删数据文件；我们紧接着就重写它。）

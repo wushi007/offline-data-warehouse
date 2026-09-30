@@ -152,9 +152,8 @@ hdfs dfs -put 2019-Oct.csv /home/lst/hadoop-data/eCommerce_behavior/
 │   ├── GETTING_STARTED.md  # 从零跑通：配置 → 建表 → 跑数 → 验证
 │   ├── CODE_GUIDE.md       # 代码解析：架构 / 各层实现 / 设计取舍
 │   ├── WORKFLOW.md         # 日常操作手册
-│   ├── incremental/        # 本次建设：构建记录 / 25 个坑复盘 / 告警机制
-│   └── legacy/             # 旧实现：数据字典 / 性能基准 / 踩坑
-└── interview/              # 面试问答（部分路径已失效，待重新对齐）
+│   ├── incremental/        # 本次建设：构建记录 / 告警机制
+│   └── legacy/             # 旧实现：数据字典 / 性能基准
 ```
 
 ## 文档
@@ -165,7 +164,6 @@ hdfs dfs -put 2019-Oct.csv /home/lst/hadoop-data/eCommerce_behavior/
 | **[docs/CODE_GUIDE.md](docs/CODE_GUIDE.md)** | **代码解析**：五层架构、每层实现细节、SCD2 算法、幂等机制、6 个关键设计决策 |
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | 日常操作手册 |
 | [docs/incremental/WAREHOUSE_BUILD.md](docs/incremental/WAREHOUSE_BUILD.md) | **构建记录**：19 张表清单、分层依赖、SCD2 设计、对账结果、交叉验证 |
-| [docs/incremental/PITFALLS.md](docs/incremental/PITFALLS.md) | **25 个坑复盘**：现象 → 根因 → 修法 |
 | [docs/incremental/ALERTS.md](docs/incremental/ALERTS.md) | 告警机制：4+1 通道、事件分级、台账字段 |
 | [docs/legacy/DWS_ADS_TABLES.md](docs/legacy/DWS_ADS_TABLES.md) | DWS/ADS 数据字典（34 天实测数字） |
 | [docs/legacy/PERFORMANCE_BENCHMARK.md](docs/legacy/PERFORMANCE_BENCHMARK.md) | StarRocks vs Spark 查询性能基准 |
@@ -175,7 +173,6 @@ hdfs dfs -put 2019-Oct.csv /home/lst/hadoop-data/eCommerce_behavior/
 - **SCD2 时间精度到天**：源数据只有「观测时刻」没有「变更时刻」，`dw_start_date` 无法更细
 - **单日 UV 与旧实现有 0.0x% 偏移**：本次固定了确定性去重排序，旧实现保留哪条不确定；月度守恒指标完全对得平
 - **`dwd_event_dirty` 为 0 行**是正常的：源数据本身无脏数据，隔离表与规则保留待用
-- **`interview/INTERVIEW_ANSWERS.md`** 中大量代码路径指向已删除文件，尚未重新对齐
 
 ## 许可
 

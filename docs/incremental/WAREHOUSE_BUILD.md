@@ -119,7 +119,7 @@ ODS(物理分区) → DWD 清洗 → DWS 汇总(4表) → ADS 应用(7表)
 |---|---|
 | 分区级覆盖 | 全链路静态分区 `INSERT OVERWRITE TABLE t PARTITION (event_date='D')`，重跑只重写当天 |
 | 动态覆盖兜底 | `spark.sql.sources.partitionOverwriteMode=dynamic`（`etl/utils.py::get_spark`） |
-| 时区固定 | `spark.sql.session.timeZone=UTC`（源时间戳是 UTC；不锁死会让 `to_date` 把每天 16:00-23:59 挪到次日，见 `../legacy/PITFALLS.md` A2） |
+| 时区固定 | `spark.sql.session.timeZone=UTC`（源时间戳是 UTC；不锁死会让 `to_date` 把每天 16:00-23:59 挪到次日） |
 | 断点续跑 | `--skip-existing`：DWD 分区已有文件则跳过，批量回补可从断点接上 |
 | 重建前清目录 | `utils.drop_path()`：外部表 DROP 不删文件，残留目录会被推断进新表导致 arity 不匹配 |
 
@@ -235,124 +235,7 @@ airflow backfill create --dag-id incremental_warehouse_dag \
 | `etl/ads/ads_user_retention_daily.py` | 留存日报（区间型，右删失为 NULL） |
 | `etl/ads/ads_user_rfm_snapshot.py` | RFM 八分群（全量快照，`as_of_dt` 分区） |
 
----
-
-## 九、错误复盘（现象 → 根因 → 修复 → 教训）
-
-### 🔴 A. 数据正确性类
-
-#### A1. 留存表列序错位，实际值全串位（本次最严重的 bug）
-**现象**：留存表打印出 `D+1 30393.0%` —— 留存率不可能超过 100%。
-**根因**：`INSERT OVERWRITE TABLE t PARTITION (...)` **没写列名列表**，Spark 按**位置**映射。
-我的 SELECT 输出顺序是 `d0_uv, d1_uv, d3_uv, d7_uv, d1_rate, d3_rate, d7_rate`，
-而表 DDL 是 `d0_uv, d1_uv, d1_rate, d3_uv, d3_rate, d7_uv, d7_rate`。
-于是 `d1_rate` 列里装进了 `d3_uv` 的**计数**（30,393），被 Spark 按目标列类型 cast 成 double → 显示成 `30393.0%`。
-`d3_rate` 列里装的其实是真正的 D+1 率（17.6799%），看起来"像对的"，掩盖了错误。
-**修复**：输出顺序改为与 DDL 一致（uv/rate 交替），**并加上显式列名列表**：
-```sql
-INSERT OVERWRITE TABLE ads.ads_user_retention_daily PARTITION (event_date='D')
-(d0_uv, d1_uv, d1_rate, d3_uv, d3_rate, d7_uv, d7_rate)
-SELECT ...
-```
-**教训**：① 位置映射的 INSERT 是静默错误——同类型列串位不会报错，只会算错；
-② **同类型列串位比类型不匹配更危险**（类型不匹配至少会报错）；③ 从此这类 INSERT 一律写列名列表。
-另外这条是**靠量纲自检发现的**：留存率 >100% 是业务上不可能的值，所以"打印关键指标的一个合理区间"值得做。
-
-#### A2. SCD2 有 92,844 个商品没有当前版本
-**现象**：拉链校验 `当前版本数 ≠1 的商品 92,844`。
-**根因**：`dw_is_current` 误用「该版本末次出现日 = 统计窗口末日」判定。
-**商品中途不再出现 ≠ 属性变更**（缺观测不等于变更）——那些 10-31 之前就不再出现的商品，全部被判成"非当前"。
-**修复**：改为「每商品的**最后一个版本**即当前版本」，与窗口末日无关：
-`ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY dw_start_date DESC) = 1`。
-**教训**：SCD2 的"当前"是**版本序列**的属性，不是"和统计窗口对齐"的属性。修完 166,794 个商品各一个当前版本，0 违规。
-
-#### A3. 去重不确定，重跑结果会漂移
-**现象**：改完 DWD 去重逻辑重跑 10-01，会话数从 268,702 变 268,700。
-**根因**：去重键 `(user_id, event_time, product_id, event_type)` 的**所有列都参与分组**，
-所以**组内 `event_time` 必然相同**，`ORDER BY event_time` 根本分不出胜负 → 保留哪条取决于扫描顺序。
-而组内 `user_session / brand / price` 可能不同，于是下游会话数和类目快照跟着漂。
-**修复**：排序追加全部剩余列做兜底（`event_time, category_id, category_code, brand, price, user_session`）。
-**教训**：**幂等的前提是确定性**。窗口函数里 `ORDER BY` 有并列时，"重跑可重复"就是假的。
-
-#### A4. DQC 打印的事件时间看着像串日
-**现象**：2019-10-01 分区打印 `事件时间 2019-10-01 08:00:00 ~ 2019-10-02 07:59:59`，像混进了次日数据（+8 小时）。
-**根因**：数据没错（时区一致性校验 0 错位可证）。是 py4j 把 Timestamp **按 Python 进程本地时区（+8）渲染**了。
-**修复**：`DATE_FORMAT(MIN(event_time), 'yyyy-MM-dd HH:mm:ss')` 转成字符串再取，显式 UTC → 打印 `00:00:00 ~ 23:59:59`。
-**教训**：质量报告里凡是**时间**都要声明时区；跨语言边界（JVM↔Python）的时间对象别直接打印。
-
-### 🟡 B. 工程实现类
-
-#### B1. driver 6g 把 JVM 撑爆，被内核 OOM killer 杀掉
-**现象**：跑到第 10 天整个进程挂掉，`Py4JNetworkError: Answer from Java side is empty` → `ConnectionRefusedError`。
-**根因**：机器只有 7.6G 内存，StarRocks FE（1.2G）+ HDFS NN/DN 常驻；我给了 `driver.memory=6g`。
-`dmesg` 实锤：`Out of memory: Killed process (java) total-vm:25GB anon-rss:3.6GB`。
-**修复**：driver 降到 3g（逐日任务是分区级小作业，用不到大堆）；批量任务拆层、各起独立进程；
-并加了 `--skip-existing` 断点续跑——正是靠它从第 10 天接上的。
-**教训**：driver 内存要按**机器可用内存**给，不是按"任务看起来大"给。
-另外：Spark 任务"死在半路 + py4j 连接断开"要先看 `dmesg | grep -i oom`，别急着怀疑代码。
-```bash
-dmesg | grep -iE "oom-kill|Killed process"     # 一眼定位是不是被系统杀的
-```
-
-#### B2. `drop_path` 把外部表 LOCATION 删了，建表报 PATH_NOT_FOUND
-**现象**：`AnalysisException: [PATH_NOT_FOUND] Path does not exist: .../dim/dim_product_scd2`。
-**根因**：全量重建前我清空了 HDFS 目录，但**表还注册在 metastore 上**，Spark 建表时校验 LOCATION 存在。
-**修复**：`drop_path()` 删完立刻 `mkdirs()` 补回空目录（`keep_dir=True`）。
-**教训**：外部表的"清数据"和"删表"是两件事；清了目录但表还在，就是个半残状态。
-
-#### B3. 批量脚本漏加 `--memory`，任务还没跑就退出了
-**现象**：`ads_report.py: error: unrecognized arguments: --memory 3g`，进程秒退。
-**根因**：我给 `dwd_clean / dws_aggregate / build_dims` 都加了 `--memory`，漏了 `ads_report`。
-**修复**：补齐参数。**教训**：同一套 CLI 约定要一次铺全，漏一个就是"静默秒退"（日志里只有一行 usage，容易被当"跑完了"）。
-**后续**：这些 `--memory` 参数后来按"统一用 `get_spark()` 的配置、不要在各脚本里另设内存"的要求**全部移除**了；
-教训本身通用（CLI 约定要一次铺全），留着当记录。
-
-#### B4. Spark SQL 中文别名没加反引号
-**现象**：`[PARSE_SYNTAX_ERROR] Syntax error at or near '行'`。
-**根因**：验证查询里写了 `SELECT COUNT(*) AS 行数` —— 未加反引号的中文标识符解析失败。
-**修复**：验证查询统一用 ASCII 别名（或给中文加反引号）。**教训**：临时验证 SQL 也照生产标准写。
-
-#### B5. 删了外部表的 HDFS 目录，metastore 里留下「幽灵分区」
-**现象**：`ads_user_rfm_snapshot` 在 metastore 里注册了 `as_of_dt=2019-10-01` 和 `2019-10-31` 两个分区，
-但 HDFS 上只有后者 —— 目录不存在而注册还在。
-**根因**：我用 `utils.drop_path()` 删了整张表的 HDFS 目录，但这张表是**分区外部表**：
-- 外部表的元数据在 metastore 里，**删 HDFS 目录不会删分区注册** → 留下"幽灵分区"；
-- 后果是查这张表（不带分区条件）可能报 `[PATH_NOT_FOUND]`；而 `MSCK REPAIR` 只补不删，救不了。
-
-这跟 `../legacy/PITFALLS.md` 里「DROP TABLE 不删文件」是**同一个问题的两个面**：
-```
-外部表：DROP TABLE  → 删注册、不删文件   → 残留文件被推断进新表（arity 不匹配）
-外部表：删文件      → 删文件、不删注册   → 幽灵分区（路径不存在）
-```
-**结论：目录和注册必须一起动。**
-**修复**：`etl/ads/ads_user_rfm_snapshot.py` 不再删目录，改为让 metastore 自己删分区：
-```python
-for row in spark.sql(f"SHOW PARTITIONS {TABLE}").collect():   # as_of_dt=2019-10-01
-    k, _, v = row[0].partition("=")
-    spark.sql(f"ALTER TABLE {TABLE} DROP PARTITION ({k}='{v}')")
-```
-（外部表 `DROP PARTITION` 只清元数据、不删数据文件；我们紧接着重写该分区。）
-**验证**：重跑后 metastore 只剩 1 个分区、HDFS 只剩 1 个目录，**一一对应**；快照数字与修复前完全一致
-（347,118 用户 / GMV 229,933,212.63）→ 幂等重建。
-**教训**：操作外部表时，先把"元数据 / 文件"两件事分开想清楚要动哪个；**永远不要用 `rm -rf` 的方式去清一个在 metastore 里有注册的分区表**。
-
-### 🟢 C. 数据口径/表述类
-
-#### C1. 把"单日观测"当结论写进了文档
-**现象**：文档里写"实测单个商品单日内最多出现 2 种组合"，随后全月一查最大值是 **3**。
-**根因**：我只在 2019-10-01 这一天查过就下了结论。
-**修复**：改成全量统计后的 3，并把"样本范围"写进句子。
-**教训**：写进文档的**任何数字都要有全量口径的出处**，单日/抽样观测必须标注范围（这条同样是面试里"基准要有边界说明"的一部分）。
-
-#### C2. `dim_session` 有 349 个会话被多用户复用，不是 0
-**现象**：我原始的打印写"一对多用户会话 {multi}，应为 0"，实测是 **349**。
-**根因**：不是 bug，是**源数据噪声**：`user_session` 理论上是 per-user UUID，源里存在极少量复用。
-**修复**：不假装它是 0——打印改成如实汇报占比（0.0038%），并注明归属已按 `MAX(user_id)` 兜底归一。
-**教训**：校验语句里的"应为 0"是**断言**，断言失败时要先判断"是数据问题还是代码问题"，别顺手把阈值调松。
-
----
-
-## 十、常见误读澄清
+## 九、常见误读澄清
 
 **问：CSV 里有 datetime，为什么 HDFS 上没有？**
 HDFS 上有。直接读 parquet 的 schema 就是 `event_time: timestamp`，值与 CSV 的 `2019-10-01 00:00:00 UTC` 一一对应，
@@ -364,7 +247,7 @@ DWD 还额外派生了 `event_hour`。三个容易看错的地方：
 
 ---
 
-## 十一、后续可接
+## 十、后续可接
 
 - **StarRocks 侧**：`dwd` 库里 5 张分层表已随 09-29 重置 DROP，`starrocks/` 下的建表/装载脚本同批被删，需要重建
   （PK 模型做 SCD2 UPSERT、DUPLICATE+RANGE 做明细/汇总、Stream Load label 幂等）。

@@ -84,7 +84,7 @@ def check_day(spark, dt):
     print(f"  {'✅' if d['neg_price'] == 0 else '❌'} price 负值：{d['neg_price']}")
     if d["neg_price"]: blocked.append("negative_price")
 
-    # 6. 时区一致性（PITFALLS A2：分区日必须等于事件 UTC 日期，否则数据被挪日）
+    # 6. 时区一致性（分区日必须等于事件 UTC 日期，否则数据被挪日）
     print(f"  {'✅' if d['tz_bad'] == 0 else '❌'} 分区/UTC 日期一致性：{d['tz_bad']} 行错位"
           f"（事件时间 {d['min_t']} ~ {d['max_t']}）")
     if d["tz_bad"]: blocked.append("timezone_offset")

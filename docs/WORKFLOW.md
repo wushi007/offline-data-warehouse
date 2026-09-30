@@ -172,12 +172,10 @@ wsl -d Ubuntu-22.04 -- bash -c 'sudo -n chown -R lst:lst ~/ecom-warehouse'
 
 ---
 
-## 七、当前待办
+## 七、当前状态
 
-- [ ] **首次推送**：`cd ~/ecom-warehouse && git push -u origin main`（9 个提交待推）
-- [ ] 推完确认 GitHub 上能看到 README 和代码
-- [ ] 确认新流程顺手后，可删备份 `~/my-second-project-add.bak`（800K）
-- [ ] `interview/INTERVIEW_ANSWERS.md` 里部分路径指向已删文件，待重新对齐
+- [x] 首次推送完成，远端 `offline-data-warehouse` 已是最新
+- [x] 确认新流程顺手后，可删备份 `~/my-second-project-add.bak`（800K）
 - [ ] 仓库若设为 Public，可考虑把 `scheduler/incremental_warehouse_dag.py` 里的
       本机绝对路径（`SPARK_HOME`、`HADOOP_HOME`、`PROJECT_ROOT`）改成可配置项
 
