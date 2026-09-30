@@ -1,0 +1,66 @@
+# ======================
+# 运行环境
+# ======================
+.venv/
+venv/
+env/
+ENV/
+airflow-venv/
+
+# ======================
+# Python
+# ======================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Jupyter
+.ipynb_checkpoints/
+
+# 编辑器
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+
+# ======================
+# 敏感配置（只提交 .env.example）
+# ======================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ======================
+# 运行时产物
+# ======================
+*.log
+nohup.out
+
+# HDFS / Spark 本地残留
+spark-warehouse/
+metastore_db/
+derby.log
+
+# 告警台账（含 log_url / 主机名等本机信息）
+scheduler/alert_records/*.jsonl
+scheduler/alert_records/*.log
+
+# ======================
+# 数据文件（体积大，不入库）
+# ======================
+*.csv
+*.parquet
+*.snappy
+*.jsonl
+*.db
+*.sqlite3
+
+# 基准结果保留（体积小，作为性能对比证据）
+!starrock/bench_results/*.json

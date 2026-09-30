@@ -1,0 +1,21 @@
+# 运行时依赖
+# 安装：python -m venv .venv && .venv/bin/pip install -r requirements.txt
+#
+# Spark 需要本机已装 JDK 17 并设置 JAVA_HOME。
+
+pyspark==3.5.8
+
+# 数据处理
+pandas
+numpy
+
+# 可视化 / 报表
+matplotlib
+streamlit
+altair
+
+# StarRocks 基准与导出（starrock/）
+pymysql
+
+# Airflow DAG（scheduler/）依赖 airflow 本体，单独装在 airflow-venv 中，不在此处
+networkx
