@@ -5,9 +5,16 @@
 ```
 docs/
 ├── README.md          ← 本文件：索引 + 两代的区别
+├── WORKFLOW.md        ← 日常操作手册（改代码 / 跑任务 / 推送）
 ├── incremental/       本次建设（增量数仓：Spark + Airflow，2019-10/11）
 └── legacy/            旧实现（批量数仓：Spark + StarRocks，2019-10/11）
 ```
+
+## 先读这篇
+
+| 文档 | 内容 |
+|---|---|
+| [WORKFLOW.md](WORKFLOW.md) | **日常怎么干活**：三个路径的分工、提交推送流程、跑任务的命令、Airflow 链路、环境启停 |
 
 ## 怎么区分
 
