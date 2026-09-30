@@ -82,7 +82,15 @@ cd ~/ecom-warehouse
 ./run.sh dwd --dt 2019-11-01
 ./run.sh dim-scd2 --dt 2019-11-01
 ./run.sh ads --dt 2019-11-01
+
+# 纯 SQL（.sql 文件，走 spark-sql，不经过 Python）
+./run.sh sql sql/dqc/dwd_event_fact_dqc.sql --dt 2019-11-01
 ```
+
+**统一走 `run.sh`**，别直接 `python xxx.py` 或直接 `spark-sql -f xxx.sql` ——
+两条通道都会绕过 flock 串行闸门，而且直接跑 `spark-sql` 还会丢掉
+`spark.sql.session.timeZone=UTC` 等会话配置（后果见
+[../sql/README.md](../sql/README.md) 的「配置缺口」）。
 
 `run.sh` 会自动找解释器，顺序是：`PYTHON` 环境变量 → 仓库内 `.venv` → 同级 `.venv` →
 `~/my-spark/.venv`。你的 venv 在 `~/my-spark/.venv`，**会自动匹配到，不用额外传参**。
