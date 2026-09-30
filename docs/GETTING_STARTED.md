@@ -37,8 +37,9 @@
 **最低可行配置**：JDK 17 + Spark + HDFS + Python 环境。MySQL / Airflow / StarRocks 都不是跑通链路的前提。
 
 **内存要求**：单机跑 31 天全链路，driver 给 3~4G 即可。
-> 踩过的坑：曾给 `driver.memory=6g`，在 7.6G 内存的机器上被内核 OOM killer 杀掉
-> （`dmesg` 可见 `Out of memory: Killed process (java)`）。**driver 内存按机器可用内存给，不要按「任务看起来大」给。**
+> ⚠️ **driver 内存按机器可用内存给，不要按「任务看起来大」给。**
+> 给到 6g 时，7.6G 内存的机器上 JVM 会被内核 OOM killer 杀掉
+> （`dmesg` 可见 `Out of memory: Killed process (java)`）。单机逐日任务给 3~4g 足够。
 
 ---
 
@@ -549,6 +550,5 @@ PYTHON=/home/<user>/my-spark/.venv/bin/python ./run.sh build --dt 2019-11-01
 ## 下一步
 
 - 想知道**代码怎么组织的、每层在干什么** → 看 [CODE_GUIDE.md](CODE_GUIDE.md)
-- 想知道**建设过程踩了哪些坑** → 看 [incremental/PITFALLS.md](incremental/PITFALLS.md)
 - 想知道**数据字典与实测数字** → 看 [incremental/WAREHOUSE_BUILD.md](incremental/WAREHOUSE_BUILD.md)
 - **日常怎么干活** → 看 [WORKFLOW.md](WORKFLOW.md)
