@@ -68,7 +68,7 @@
 <项目根目录>/.venv/bin/python starrocks/bench_starrocks.py
 # Spark 侧（需 HDFS 在线）
 JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
-SPARK_HOME=/home/lst/apps/spark-3.5.9-bin-hadoop3 \
+SPARK_HOME=<你的 Spark 安装路径> \
 PYSPARK_PYTHON=<项目根目录>/.venv/bin/python \
   <项目根目录>/.venv/bin/python starrocks/bench_spark.py
 # 原始数据

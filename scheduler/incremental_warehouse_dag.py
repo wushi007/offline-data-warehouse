@@ -15,21 +15,31 @@
 # 增量语义：按 event_date 分区静态 INSERT OVERWRITE，每日仅算当日；
 #           重跑指定 ds 自动覆盖旧分区，DQC 同步重校验。
 #
-# 调度方式：schedule=None（不设定时），由 backfill / 手动触发驱动 ——
-#           因为数据是历史批次（2019-10/11），@daily 会去跑"真实的今天"而必然失败。
+# 调度方式：schedule="@daily" + 固定 end_date（关在数据区间内），由 backfill / 手动触发驱动。
+#           为什么不用 schedule=None：
+#             Airflow 3 的 backfill **拒绝** NullTimetable（schedule=None）的 DAG
+#             （DagNonPeriodicScheduleException），写 None 会把回填这条路堵死。
+#           为什么 end_date 必须早于"真实的今天"：
+#             数据是历史批次（2019-10/11），@daily 会让调度器为"今天"建 run，
+#             而 ODS 里没有那天的数据 → 必失败。end_date 一过即不再生成新 run，
+#             回填 2019-11 仍在窗口内，正常可用。
 #           回填示例：
 #             airflow backfill create --dag-id incremental_warehouse_dag \
 #                 --from-date 2019-11-01 --to-date 2019-11-30 --max-active-runs 1
 #
-# ⚠️ 内存约束：同一时刻只允许一个 SparkSession（本机 7.6G，StarRocks/HDFS/Kafka
-#    常驻约 2.5G，多会话并存被内核 OOM killer 杀过多次）。两道保障：
+# ⚠️ 内存约束：同一时刻只允许一个 SparkSession。原因：
+#     宿主 16G 内存，WSL2 默认只分到约一半（实测可见 7.6G），
+#     而 HDFS / MySQL / Airflow 常驻约 2.5G —— 多会话并存会被内核 OOM killer 杀掉。
+#   两道保障：
 #      1) max_active_tasks=1 + max_active_runs=1 —— 本 DAG 内串行；
 #      2) 所有 Spark 任务经 etl/run_locked.sh 的 flock 闸门 —— 跨 DAG、跨手动执行也串行
-#         （机器上还有另一个项目的 DAG 会起 Spark，DAG 级配置管不住它）。
+#         （机器上若有别的 DAG 会起 Spark，DAG 级配置管不住它）。
 #
-# 运行前提：./start-env.sh 拉起 HDFS 与 Airflow（check_env 守卫）。
+# 运行前提：HDFS 与 Airflow 已启动（check_env 任务会守卫）。
 # =====================================================================
 
+import glob
+import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -43,14 +53,77 @@ from airflow.providers.standard.operators.bash import BashOperator
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import alerts  # noqa: E402
 
-# ---------------- 路径常量（按你的环境改这三行） ----------------
-PROJECT_ROOT = "/home/lst/my-spark/my-second-project-add"
-VENV_PYTHON = f"{PROJECT_ROOT}/.venv/bin/python"   # 含 pyspark
-JAVA_HOME = "/usr/lib/jvm/java-17-openjdk-amd64"
-SPARK_HOME = "/home/lst/apps/spark-3.5.9-bin-hadoop3"
-HADOOP_HOME = "/home/lst/apps/hadoop-3.4.3"
-HADOOP_CONF_DIR = f"{HADOOP_HOME}/etc/hadoop"
-DATA_START = "2019-10-01"        # 数仓数据起点（RFM/留存这类区间任务要用）
+# ---------------- 路径常量 ----------------
+# 全部支持环境变量覆盖，并给出合理默认值 —— 默认值优先从本文件位置推导，
+# 所以把仓库 clone 到任何目录都能直接跑，无需改代码。
+# 需要覆盖时（比如 Spark/Hadoop 装在别处），在 Airflow 的环境里导出：
+#   export DW_PROJECT_ROOT=/path/to/ecom-warehouse
+#   export DW_VENV_PYTHON=/path/to/venv/bin/python
+#   export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+#   export SPARK_HOME=/opt/spark
+#   export HADOOP_HOME=/opt/hadoop
+#
+# 本文件在 <repo>/scheduler/ 下，故 repo 根 = 上两级目录
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+
+
+def _first_existing(candidates, fallback):
+    """返回第一个存在的路径；都不存在时返回 fallback（由 check_env 任务负责报错）。"""
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return fallback
+
+
+def _pick_dir(env_key, patterns, fallback):
+    """按优先级取一个目录：环境变量 > 探测常见安装位置 > fallback。
+
+    为什么要探测：Spark / Hadoop 的安装位置因人而异，写死会让人 clone 后跑不起来，
+    而完全不探测又要求每次都导出环境变量。折中做法是探测几个约定俗成的路径。
+    """
+    v = os.environ.get(env_key)
+    if v:
+        return v
+    for pat in patterns:
+        # 只取目录（排除 .tgz 之类的安装包），版本号排序取最新
+        found = sorted(p for p in glob.glob(os.path.expanduser(pat)) if os.path.isdir(p))
+        if found:
+            return found[-1]
+    return fallback
+
+
+PROJECT_ROOT = os.environ.get("DW_PROJECT_ROOT", _REPO_ROOT)
+
+# venv 位置按候选顺序探测（与 run.sh 的策略一致）：
+# 环境变量 → 仓库内 .venv → 同级 .venv → 家目录 .venv
+# 若 venv 在别处，建议在仓库根建软链接：ln -s /path/to/venv .venv
+VENV_PYTHON = _first_existing(
+    [
+        os.environ.get("DW_VENV_PYTHON"),
+        f"{PROJECT_ROOT}/.venv/bin/python",
+        f"{PROJECT_ROOT}/../.venv/bin/python",
+        os.path.expanduser("~/.venv/bin/python"),
+    ],
+    f"{PROJECT_ROOT}/.venv/bin/python",
+)
+
+JAVA_HOME = _pick_dir(
+    "JAVA_HOME",
+    ["/usr/lib/jvm/java-17-openjdk-*", "/usr/lib/jvm/java-17-*", "/usr/lib/jvm/default-java"],
+    "/usr/lib/jvm/java-17-openjdk-amd64",
+)
+SPARK_HOME = _pick_dir(
+    "SPARK_HOME",
+    ["~/apps/spark-*", "/opt/spark*", "/usr/local/spark*"],
+    "/opt/spark",
+)
+HADOOP_HOME = _pick_dir(
+    "HADOOP_HOME",
+    ["~/apps/hadoop-[0-9]*", "/opt/hadoop*", "/usr/local/hadoop*"],
+    "/opt/hadoop",
+)
+HADOOP_CONF_DIR = os.environ.get("HADOOP_CONF_DIR", f"{HADOOP_HOME}/etc/hadoop")
+DATA_START = os.environ.get("DW_DATA_START", "2019-10-01")   # 数仓数据起点（RFM/留存这类区间任务要用）
 
 # ★ 为什么 SPARK_HOME / HADOOP_CONF_DIR 必须显式写在这里：
 #   Airflow 的 BashOperator.get_env() 逻辑是——
@@ -191,17 +264,41 @@ with DAG(
     doc_md=__doc__,
 ) as dag:
 
-    # 0. 环境守卫
+    # 0. 环境守卫：先校验路径配置，再确认 HDFS 就绪
+    #    提前失败 + 给出可操作的提示，避免后面报出难懂的 Spark 异常
     check_env = BashOperator(
         task_id="check_env",
         bash_command="""
-if command -v ss >/dev/null 2>&1 && ss -tln 2>/dev/null | grep -q ':8020 '; then
-    echo "OK: HDFS NameNode 正在监听 8020"
-else
-    echo "ERROR: HDFS 未就绪，请先运行 ./start-env.sh"
-    exit 1
+fail() { echo "ERROR: $1"; echo "提示: $2"; exit 1; }
+
+# 1) 解释器（要有 pyspark）
+if [ ! -x "__VENV__" ]; then
+    fail "解释器不存在: __VENV__" \
+         "设置 DW_VENV_PYTHON 指向你的 venv python，或先创建 venv 并 pip install -r requirements.txt"
 fi
-""",
+
+# 2) JDK / Spark / Hadoop 目录
+for pair in "JAVA_HOME=__JAVA__" "SPARK_HOME=__SPARK__" "HADOOP_HOME=__HADOOP__"; do
+    name="${pair%%=*}"; path="${pair#*=}"
+    [ -d "$path" ] || fail "$name 目录不存在: $path" "导出 $name 指向实际安装路径（见 docs/GETTING_STARTED.md）"
+done
+
+# 3) Hadoop 配置目录
+[ -d "__CONF__" ] || fail "HADOOP_CONF_DIR 不存在: __CONF__" "导出 HADOOP_CONF_DIR 指向 Hadoop 的 etc/hadoop 目录"
+
+# 4) HDFS NameNode
+if command -v ss >/dev/null 2>&1 && ss -tln 2>/dev/null | grep -q ':8020 '; then
+    echo "OK: 路径配置正常，HDFS NameNode 正在监听 8020"
+else
+    fail "HDFS 未就绪（8020 无监听）" "先启动 HDFS（hdfs namenode -format 后 start-dfs.sh）"
+fi
+""".replace("__VENV__", VENV_PYTHON)
+   .replace("__JAVA__", JAVA_HOME)
+   .replace("__SPARK__", SPARK_HOME)
+   .replace("__HADOOP__", HADOOP_HOME)
+   .replace("__CONF__", HADOOP_CONF_DIR),
+        env=TASK_ENV,
+        append_env=True,
         retries=0,
     )
 

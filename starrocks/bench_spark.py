@@ -9,7 +9,7 @@ bench_spark.py — Spark 3.5.9 查询性能基准（与 StarRocks 同查询、�
 - 覆盖: Q1-Q7、Q9（仅基于事实表本身的查询；Q8/Q10 依赖 StarRocks 内 DWS/ADS 表，Spark 侧无法对等执行）
 - 输出: starrocks/bench_results/spark_bench.json
 - 用法: PYSPARK_PYTHON=<项目根目录>/.venv/bin/python \
-        SPARK_HOME=/home/lst/apps/spark-3.5.9-bin-hadoop3 \
+        SPARK_HOME=<你的 Spark 安装路径> \
         <项目根目录>/.venv/bin/python starrocks/bench_spark.py
 """
 

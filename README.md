@@ -4,6 +4,13 @@
 数据集（2019-Oct / 2019-Nov，约 4,700 万行行为日志）构建的**离线数仓**，覆盖 **ODS → DWD → DIM → DWS → ADS** 完整五层，
 31 天数据全链路跑通并通过跨层对账。
 
+> **运行环境**：一台 **16 GB 内存 / 1 TB 硬盘**的 Windows 笔记本，环境为 **WSL2 + Ubuntu 22.04**，单机跑完 4,700 万行。
+>
+> ⚠️ **内存是这套设计的硬约束**：WSL2 默认只向虚拟机分配约一半物理内存
+> （16 GB 宿主机上实测可见 **7.6 GB**），而 HDFS / MySQL / Airflow 常驻约 2.5 GB。
+> 因此本项目的并发度、driver 内存、串行闸门都是围绕「**单会话、低并发**」来设计的 ——
+> 详见 [内存与并发约束](#内存与并发约束)。换到更大内存的机器上可以放宽，但没必要。
+
 > **第一次看这个项目？** 想跑起来 → [从零跑通](docs/GETTING_STARTED.md)；
 > 想懂代码 → [代码解析](docs/CODE_GUIDE.md)。
 
@@ -47,17 +54,47 @@
 **关键设计取舍**：`event_type / behavior_type / is_purchase / event_hour / user_session` 作为**退化维度**直接进事实表，
 DWS 聚合因此不需要 JOIN 维度表；而 ADS 漏斗跨商品精确去重 UV，必须回 DWD 计算。
 
+## 内存与并发约束
+
+这一节的参数不是「调优结果」，而是**在 16 GB / WSL2 环境下的生存底线** ——
+理解了它，才知道为什么代码里有那么多「串行」和「单会话」的限制。
+
+**可用内存有多少**：宿主 16 GB，但 WSL2 默认只分配约一半（`/etc/wsl.conf` 未调优时
+约为物理内存的 50%，实测可见 **7.6 GB**）。再扣掉常驻的 HDFS + MySQL + Airflow（约 2.5 GB），
+**留给 Spark 的实际余量只有 4~5 GB**。
+
+**由此决定的三条硬性设计**：
+
+| 约束 | 取值 | 为什么 |
+|---|---|---|
+| **driver 内存** | `3g`（`get_spark(memory=...)`） | 按机器可用内存给，不是按「任务看起来大」给。给到 `6g` 时 JVM 会被内核 OOM killer 杀掉 |
+| **同一时刻一个 SparkSession** | `etl/run_locked.sh` 的 `flock` 闸门 | 两个会话并存会 OOM。闸门跨 DAG、跨手动执行都生效 |
+| **调度并发 = 1** | DAG 的 `max_active_tasks=1` + `max_active_runs=1` | 与上面闸门是双保险：DAG 级管住本 DAG，闸门管住整机 |
+
+**判据是「分区粒度匹配到达粒度」**：数据是**按天批量**落的（不是小时流），
+DWD 重跑一天只要约 45 秒。所以 31 天就是 31 个日分区，重跑只覆盖当天 ——
+没有为了「看起来更快」去做小时级分区，那只会把 31 个目录变成 744 个碎分区。
+
+**换到更大内存的机器**：可以放开 `driver.memory`、提高 `max_active_tasks`，
+但**不建议去掉 flock 闸门** —— 它是「重跑安全」的一部分，不只是内存保护。
+
 ## 快速开始
 
 ### 环境要求
 
-| 组件 | 版本 |
-|---|---|
-| JDK | 17 |
-| Spark | 3.5.8 |
-| Hadoop (HDFS) | 3.x，`hdfs://localhost:8020` |
-| Hive (Metastore) | 用于外部表注册 |
-| Python | 3.10 |
+| 组件 | 版本 | 说明 |
+|---|---|---|
+| 操作系统 | **WSL2 + Ubuntu 22.04** | 其他 Linux 发行版同理 |
+| **内存** | **16 GB**（宿主） | WSL2 实际可见约 7.6 GB，见 [内存与并发约束](#内存与并发约束) |
+| **硬盘** | **1 TB** | 源 CSV 约 9 GB，数仓中间结果约 15 GB |
+| JDK | 17 | Spark 3.5 要求 |
+| Spark | 3.5.9 | PySpark 3.5.8 |
+| Hadoop (HDFS) | 3.4.3 | 只用 HDFS，不需要 MR |
+| Hive Metastore | Spark 内嵌 | 用于外部表注册 |
+| Python | 3.10 | 3.9+ 均可 |
+
+**最低可行配置**：JDK 17 + Spark + HDFS + Python 环境。
+MySQL / Airflow / StarRocks 都是可选组件，不影响主链路跑通。
 
 ```bash
 # 1. 安装依赖
@@ -80,8 +117,9 @@ hdfs dfs -put 2019-Oct.csv /home/lst/hadoop-data/eCommerce_behavior/
 ./run.sh check --start 2019-10-01 --end 2019-10-31
 ```
 
-> `run.sh` 里的解释器路径 `PY=<项目根目录>/.venv/bin/python` 和 `config/config.py` 里的 HDFS 根路径
-> 需要按你的环境改一下。
+> 需要按你的环境调整的只有两处：`config/config.py` 里的 HDFS 根路径，
+> 以及 venv 位置（`run.sh` 会自动探测，探测不到时用 `PYTHON=/path/to/python ./run.sh ...`）。
+> 详细步骤与常见报错见 [从零跑通](docs/GETTING_STARTED.md)。
 
 ### 常用命令
 

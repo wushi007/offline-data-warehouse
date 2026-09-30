@@ -10,8 +10,9 @@ alerts.py — 任务告警通知（被 DAG 的 on_failure_callback / on_retry_ca
 
 通道（前两个默认开，后两个靠环境变量启用）
 ------------------------------------------
-① 本地台账       {AIRFLOW_HOME}/alerts/alerts-YYYY-MM-DD.jsonl   （结构化，可 grep/jq）
-② Windows 告警文件 /mnt/c/Users/lst/Documents/数仓告警.txt         （WSL 里能写到 Windows，打开就能看）
+① 本地台账       scheduler/alert_records/alerts-YYYY-MM-DD.jsonl   （结构化，可 grep/jq）
+② Windows 告警文件 /mnt/c/Users/<用户名>/Documents/数仓告警.txt      （WSL 里能写到 Windows，打开就能看；
+                  目录不存在时自动跳过；可用 DW_ALERT_WIN_FILE 覆盖）
 ③ 桌面弹窗       best-effort（装了 BurntToast 才有 toast；否则跳过。刻意不用阻塞式 MessageBox）
 ④ HTTP Webhook   DW_ALERT_WEBHOOK=<企业微信/钉钉/飞书 机器人 URL>
 ⑤ 邮件 SMTP      DW_ALERT_SMTP_HOST / _PORT / _USER / _PASS / _TO（都设了才启用）
@@ -26,13 +27,16 @@ import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
-AIRFLOW_HOME = Path(os.environ.get("AIRFLOW_HOME", "/home/lst/my-spark/airflow"))
+AIRFLOW_HOME = Path(os.path.expanduser(os.environ.get("AIRFLOW_HOME", "~/airflow")))
 # 告警记录放在**项目内**（scheduler/alert_records/），不放 AIRFLOW_HOME：
 #   ① 跟代码同仓，一起备份/迁移，不随 Airflow 重装丢失；
 #   ② 目录名特意避开 `alerts`——本模块就叫 alerts.py，同名目录会和它撞（Python 导入歧义）。
 ALERT_DIR = Path(__file__).resolve().parent / "alert_records"
 LOG_DIR = AIRFLOW_HOME / "logs"
-WIN_ALERT_FILE = Path("/mnt/c/Users/lst/Documents/数仓告警.txt")
+# Windows 告警文件（WSL 专用通道）：目录不存在时自动跳过，所以非 WSL 环境无副作用。
+# 默认按当前用户名推导，可用 DW_ALERT_WIN_FILE 覆盖。
+_DEFAULT_WIN_FILE = "/mnt/c/Users/{}/Documents/数仓告警.txt".format(os.environ.get("USER", "user"))
+WIN_ALERT_FILE = Path(os.environ.get("DW_ALERT_WIN_FILE", _DEFAULT_WIN_FILE))
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LOCK_WRAPPER = str(PROJECT_ROOT / "etl" / "run_locked.sh")
 

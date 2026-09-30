@@ -23,9 +23,14 @@
 
 ## 一、环境要求
 
+**本项目验证过的机器**：一台 **16 GB 内存 / 1 TB 硬盘**的 Windows 笔记本，
+运行环境 **WSL2 + Ubuntu 22.04**，单机跑完 4,700 万行行为日志。
+
 | 组件 | 本项目验证过的版本 | 说明 |
 |---|---|---|
-| 操作系统 | Ubuntu 22.04.5（WSL2 亦可） | 其他 Linux 发行版同理 |
+| 操作系统 | **Ubuntu 22.04.5 on WSL2** | 其他 Linux 发行版同理 |
+| **内存** | **16 GB（宿主）** | WSL2 实际可见约 **7.6 GB**，见下方「内存说明」 |
+| **硬盘** | **1 TB** | 源 CSV 约 9 GB；数仓中间结果约 15 GB |
 | **JDK** | **17** | Spark 3.5 要求 JDK 8/11/17，本项目用 17 |
 | Python | 3.10.12 | 3.9+ 均可 |
 | **Spark** | **3.5.9**（hadoop3 版） | PySpark 3.5.8 |
@@ -36,10 +41,22 @@
 
 **最低可行配置**：JDK 17 + Spark + HDFS + Python 环境。MySQL / Airflow / StarRocks 都不是跑通链路的前提。
 
-**内存要求**：单机跑 31 天全链路，driver 给 3~4G 即可。
-> ⚠️ **driver 内存按机器可用内存给，不要按「任务看起来大」给。**
-> 给到 6g 时，7.6G 内存的机器上 JVM 会被内核 OOM killer 杀掉
-> （`dmesg` 可见 `Out of memory: Killed process (java)`）。单机逐日任务给 3~4g 足够。
+### 内存说明（WSL2 用户尤其注意）
+
+宿主 16 GB，但 **WSL2 默认只向虚拟机分配约一半物理内存**（未调优 `/etc/wsl.conf` 时，
+实测可见 **7.6 GB**）。再扣掉常驻的 HDFS + MySQL + Airflow（约 2.5 GB），
+**留给 Spark 的余量只有 4~5 GB**。
+
+由此决定了三条硬性设计：
+
+| 约束 | 取值 | 原因 |
+|---|---|---|
+| driver 内存 | `3g` | 按机器**可用**内存给，不是按「任务看起来大」给。给到 `6g` 时 JVM 会被内核 OOM killer 杀掉（`dmesg` 可见 `Out of memory: Killed process (java)`） |
+| 同一时刻一个 SparkSession | `etl/run_locked.sh` 的 `flock` 闸门 | 两个会话并存会 OOM |
+| 调度并发 = 1 | `max_active_tasks=1` + `max_active_runs=1` | 与闸门构成双保险 |
+
+> 像 `/home/lst/hadoop-data/warehouse` 这样的路径都写在 `config/config.py` 里，
+> 换机器时改那一处即可；**内存相关的取值也可以按新机器的可用内存放宽**。
 
 ---
 
@@ -370,7 +387,38 @@ ln -s /path/to/ecom-warehouse/scheduler/incremental_warehouse_dag.py \
 
 用软链接而不是复制，好处是**改仓库里的 DAG 就是改 Airflow 的 DAG**，一份代码两处用。
 
-### 3. DAG 结构
+### 3. 路径配置（通常不用管）
+
+DAG 需要知道 venv、JDK、Spark、Hadoop 在哪。它**会自动探测**，顺序是：
+
+| 变量 | 探测顺序 |
+|---|---|
+| `DW_PROJECT_ROOT` | 环境变量 → 从 DAG 文件位置推导（`<repo>/scheduler/` 的上两级） |
+| `DW_VENV_PYTHON` | 环境变量 → `<repo>/.venv` → `<repo>/../.venv` → `~/.venv` |
+| `JAVA_HOME` | 环境变量 → `/usr/lib/jvm/java-17-openjdk-*` |
+| `SPARK_HOME` | 环境变量 → `~/apps/spark-*` → `/opt/spark*` → `/usr/local/spark*` |
+| `HADOOP_HOME` | 环境变量 → `~/apps/hadoop-[0-9]*` → `/opt/hadoop*` → `/usr/local/hadoop*` |
+
+**所以只要 venv 建在仓库内（或建个软链接），Spark/Hadoop 装在常规位置，就什么都不用配。**
+
+装在不常规的位置时，在**启动 Airflow 的环境里**导出：
+
+```bash
+export SPARK_HOME=/your/path/to/spark
+export HADOOP_HOME=/your/path/to/hadoop
+export DW_VENV_PYTHON=/your/path/to/venv/bin/python
+```
+
+> 💡 如果 venv 在仓库外，最省事的做法是在仓库根建软链接，而不是设环境变量：
+> ```bash
+> ln -s /path/to/your/venv .venv
+> ```
+> `.gitignore` 已包含 `.venv`（含不带斜杠的写法，覆盖软链接的情况），不会被提交。
+
+路径有问题时，DAG 的第一个任务 `check_env` 会**提前失败并打印具体缺哪个路径**，
+不会让你在 Spark 抛出的难懂异常里找原因。
+
+### 4. DAG 结构
 
 一表一个 task，依赖链如下：
 
@@ -389,7 +437,7 @@ check_env
 
 **质量闸门失败即阻断下游** —— `dwd_event_fact_dqc` 不过，DWS/ADS 全部不跑。
 
-### 4. 触发回补
+### 5. 触发回补
 
 ```bash
 airflow backfill create --dag-id incremental_warehouse_dag \
@@ -398,7 +446,7 @@ airflow backfill create --dag-id incremental_warehouse_dag \
 
 > `max-active-runs 1` 配合 flock 闸门，双保险保证串行。
 
-### 5. 告警
+### 6. 告警
 
 `scheduler/alerts.py` 挂了 4+1 个通道，由 DAG 的 `on_failure_callback` 触发：
 

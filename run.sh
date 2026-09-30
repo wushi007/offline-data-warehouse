@@ -8,17 +8,26 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-export PATH="$JAVA_HOME/bin:$PATH"
+# JDK 17：环境变量优先；未设置时用 Debian/Ubuntu 的默认位置
+if [ -z "${JAVA_HOME:-}" ]; then
+    for _jh in /usr/lib/jvm/java-17-openjdk-amd64 /usr/lib/jvm/java-17-openjdk /usr/lib/jvm/default-java; do
+        [ -d "$_jh" ] && { JAVA_HOME="$_jh"; break; }
+    done
+fi
+if [ -n "${JAVA_HOME:-}" ]; then
+    export JAVA_HOME
+    export PATH="$JAVA_HOME/bin:$PATH"
+fi
 
-# 解释器解析顺序：PYTHON 环境变量 > 仓库内 .venv > 常见的同级 venv > 系统 python3
+# 解释器解析顺序：PYTHON 环境变量 > 仓库内 .venv > 同级 .venv > 家目录 .venv > 系统 python3
 # 可用 PYTHON=/path/to/python ./run.sh ... 显式指定
+# 若 venv 在仓库外，推荐在仓库根建软链接：ln -s /path/to/venv .venv
 resolve_python() {
     if [ -n "${PYTHON:-}" ]; then echo "$PYTHON"; return; fi
     local c
     for c in "$PWD/.venv/bin/python" \
              "$PWD/../.venv/bin/python" \
-             "/home/lst/my-spark/.venv/bin/python"; do
+             "$HOME/.venv/bin/python"; do
         [ -x "$c" ] && { echo "$c"; return; }
     done
     echo "python3"
