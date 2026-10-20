@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# 复制到 $SPARK_HOME/conf/spark-env.sh，按本机实际路径调整。
+# standalone 单机：1 Master + 1 Worker + 4 Executor（每个 1g / 2 核）。
+
+# export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+# export HADOOP_HOME=$HOME/apps/hadoop-3.4.3
+# export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
+
+export SPARK_MASTER_HOST=localhost
+# Master / Worker 守护进程各 512m，避免默认 1g×2 吃掉内存
+export SPARK_DAEMON_MEMORY=512m
+# Worker 可分配总内存 ≥ Executor 数 × executor.memory = 4 × 1g
+export SPARK_WORKER_MEMORY=4g
+# 8 核 ÷ 每 Executor 2 核 = 4 个 Executor
+export SPARK_WORKER_CORES=8
+# Standalone 默认会占用集群全部核，显式限制为 8
+export SPARK_MASTER_OPTS="-Dspark.deploy.defaultCores=8"
+export SPARK_WORKER_DIR=${HOME}/spark-standalone/work

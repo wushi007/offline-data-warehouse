@@ -103,6 +103,11 @@ TASK_ENV = {
     "SPARK_HOME": SPARK_HOME,
     "HADOOP_HOME": HADOOP_HOME,
     "HADOOP_CONF_DIR": HADOOP_CONF_DIR,
+    "SPARK_MASTER": _cfg("spark_master", "spark://localhost:7077"),
+    "SPARK_DRIVER_MEMORY": _cfg("spark_driver_memory", "1g"),
+    "SPARK_EXECUTOR_MEMORY": _cfg("spark_executor_memory", "1g"),
+    "SPARK_EXECUTOR_CORES": _cfg("spark_executor_cores", "2"),
+    "SPARK_EXECUTOR_INSTANCES": _cfg("spark_executor_instances", "4"),
     "PATH": (f"{JAVA_HOME}/bin:{SPARK_HOME}/bin:{HADOOP_HOME}/bin:{HADOOP_HOME}/sbin:"
              "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"),
 }
@@ -141,7 +146,8 @@ _CHECK_ENV_CMD = _render_check_env(
     Path(__file__).resolve().parent / "check_env.sh",
     {"VENV": VENV_PYTHON, "JAVA": JAVA_HOME, "SPARK": SPARK_HOME,
      "HADOOP": HADOOP_HOME, "CONF": HADOOP_CONF_DIR, "DAGS": _CFG_DAGS_FOLDER or "",
-     "AIRFLOW_HOME": str(_AIRFLOW_HOME or ""), "OWNER_ROOT": PROJECT_ROOT},
+     "AIRFLOW_HOME": str(_AIRFLOW_HOME or ""), "OWNER_ROOT": PROJECT_ROOT,
+     "SPARK_MASTER": _cfg("spark_master", "spark://localhost:7077")},
 )
 
 STEP_SCRIPTS = {

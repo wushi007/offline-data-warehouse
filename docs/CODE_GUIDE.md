@@ -144,10 +144,14 @@ MYSQL = {"password": os.environ.get("DW_MYSQL_PASSWORD", ""), ...}
 #### `get_spark()` —— 统一 SparkSession
 
 ```python
-def get_spark(app_name="WarehouseTask", memory="4g", shuffle_partitions=100):
+def get_spark(app_name="WarehouseTask", memory=None, shuffle_partitions=100):
+    memory = memory or os.environ.get("SPARK_DRIVER_MEMORY", "1g")
     return (SparkSession.builder
-        .master("local[6]")
+        .master(os.environ.get("SPARK_MASTER", "spark://localhost:7077"))
         .config("spark.driver.memory", memory)
+        .config("spark.executor.memory", os.environ.get("SPARK_EXECUTOR_MEMORY", "1g"))
+        .config("spark.executor.cores", os.environ.get("SPARK_EXECUTOR_CORES", "2"))
+        .config("spark.executor.instances", os.environ.get("SPARK_EXECUTOR_INSTANCES", "4"))
         .config("spark.hadoop.fs.defaultFS", HDFS_ROOT)
         .config("spark.sql.adaptive.enabled", "true")
         .config("spark.sql.session.timeZone", "UTC")                        # 关键
@@ -155,6 +159,8 @@ def get_spark(app_name="WarehouseTask", memory="4g", shuffle_partitions=100):
         .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
         .getOrCreate())
 ```
+
+默认连 standalone 集群；`SPARK_MASTER=local[6]` 可切回本地模式。
 
 其中两项配置关系到正确性，不是可选优化：
 

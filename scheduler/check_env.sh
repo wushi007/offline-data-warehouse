@@ -2,7 +2,7 @@
 # =====================================================================
 # check_env.sh —— DAG check_env 任务的环境守卫。
 # DAG 加载时将 __VENV__ / __JAVA__ / __SPARK__ / __HADOOP__ / __CONF__ /
-# __DAGS__ / __AIRFLOW_HOME__ / __OWNER_ROOT__ 替换为实际配置后执行。
+# __DAGS__ / __AIRFLOW_HOME__ / __OWNER_ROOT__ / __SPARK_MASTER__ 替换为实际配置后执行。
 # 失败即提前退出并给出修复提示；典型根因是 SPARK_HOME 缺失导致 TABLE_OR_VIEW_NOT_FOUND。
 # =====================================================================
 set -uo pipefail
@@ -18,6 +18,7 @@ echo "  HADOOP_HOME    = __HADOOP__"
 echo "  HADOOP_CONF_DIR= __CONF__"
 echo "  AIRFLOW_HOME   = __AIRFLOW_HOME__"
 echo "  dags_folder    = __DAGS__"
+echo "  SPARK_MASTER   = __SPARK_MASTER__"
 echo
 
 if [ ! -x "__VENV__" ]; then
@@ -39,3 +40,16 @@ if command -v ss >/dev/null 2>&1 && ss -tln 2>/dev/null | grep -q ':8020 '; then
 else
     fail "HDFS 未就绪（8020 无监听）" "先启动 HDFS（hdfs namenode -format 后 start-dfs.sh）"
 fi
+
+# 5) Spark standalone（本地模式跳过）
+case "__SPARK_MASTER__" in
+    local*) ;;
+    *)
+        if ss -tln 2>/dev/null | grep -q ':7077 '; then
+            echo "OK: Spark Master 正在监听 7077"
+        else
+            fail "Spark Standalone 未就绪（7077 无监听）" \
+                 "先启动：__SPARK__/sbin/start-master.sh && __SPARK__/sbin/start-worker.sh spark://localhost:7077"
+        fi
+        ;;
+esac

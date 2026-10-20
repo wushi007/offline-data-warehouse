@@ -12,7 +12,7 @@
 >
 > WSL2 默认只向虚拟机分配约一半物理内存（16 GB 宿主机上实测可见 7.6 GB），
 > 扣掉常驻的 HDFS / MySQL / Airflow（约 2.5 GB）后，留给 Spark 的实际余量只有 4~5 GB。
-> 由此确定三条硬性设计：driver 内存 3g、单会话 flock 闸门、调度并发 = 1，
+> 由此确定三条硬性设计：standalone 模式下 driver 1g / executor 4×1g、单会话 flock 闸门、调度并发 = 1，
 > 详见 [内存与并发约束](#内存与并发约束)。
 
 > 第一次接触本项目时，先读 [从零跑通](docs/GETTING_STARTED.md)；
@@ -66,18 +66,37 @@ DWS 聚合因此不需要 JOIN 维度表；ADS 漏斗需要跨商品精确去重
 约为物理内存的 50%，实测可见 7.6 GB）。扣掉常驻的 HDFS + MySQL + Airflow（约 2.5 GB），
 留给 Spark 的实际余量只有 4~5 GB。
 
-由此确定三条硬性设计：
+由此确定以下硬性设计：
 
-| 约束 | 取值 | 为什么 |
+| 约束 | 取值 | 说明 |
 |---|---|---|
-| driver 内存 | `3g`（`get_spark(memory=...)`） | 按机器可用内存确定，不按任务规模。给到 `6g` 时 JVM 会被内核 OOM killer 杀掉 |
-| 同一时刻一个 SparkSession | `etl/run_locked.sh` 的 `flock` 闸门 | 两个会话并存会 OOM，闸门对 DAG 和手动执行都生效 |
-| 调度并发 = 1 | DAG 的 `max_active_tasks=1` + `max_active_runs=1` | 与上面的闸门构成双保险：DAG 级管住本 DAG，闸门管住整机 |
+| driver 内存 | `1g`（`SPARK_DRIVER_MEMORY`） | standalone 的 driver 在客户端进程内，按可用内存给，不按任务规模 |
+| executor | `4 × 1g × 2 核`（`SPARK_EXECUTOR_*`） | Worker 8 核 / 4g，正好 4 个 executor，并行度 8 |
+| 同一时刻一个 SparkSession | `etl/run_locked.sh` 的 `flock` 闸门 | 两个作业并存会 OOM，闸门对 DAG 和手动执行都生效 |
+| 调度并发 = 1 | DAG 的 `max_active_tasks=1` + `max_active_runs=1` | 与闸门构成双保险：DAG 级管住本 DAG，闸门管住整机 |
+
+Spark 侧内存上限：Master 512m + Worker 512m + Driver 1g + 4×1g executor ≈ 6g。
+executor 的 1g 是堆上限而非预占，轻量作业实际占用更低；同时只有一个作业，靠 `flock` 保证。
 
 分区粒度与数据到达粒度一致：数据按天批量落盘，不是小时流，DWD 重跑一天约 45 秒。
 31 天对应 31 个日分区，重跑只覆盖当天。项目没有采用小时级分区，否则 31 个目录会变成 744 个碎分区。
 
-换到更大内存的机器时，可以放开 `driver.memory`、提高 `max_active_tasks`，
+### Spark 运行模式
+
+默认连 standalone 集群（`spark://localhost:7077`）：
+
+```bash
+$SPARK_HOME/sbin/start-master.sh
+$SPARK_HOME/sbin/start-worker.sh spark://localhost:7077
+```
+
+集群参数模板见 `conf/spark-env.sh.example`，复制到 `$SPARK_HOME/conf/spark-env.sh` 后按本机路径调整。
+切换本地模式只改一个变量：`SPARK_MASTER=local[6]`。
+
+常用环境变量：`SPARK_MASTER`、`SPARK_DRIVER_MEMORY`、`SPARK_EXECUTOR_MEMORY`、
+`SPARK_EXECUTOR_CORES`、`SPARK_EXECUTOR_INSTANCES`，默认值在 `.env` 里。
+
+换到更大内存的机器时，可以提高 executor 数、`max_active_tasks` 和 driver 内存，
 但不建议去掉 flock 闸门，它也是重跑安全的一部分，不只是内存保护。
 
 ## 快速开始
