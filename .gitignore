@@ -70,5 +70,14 @@ scheduler/alert_records/*.log
 *.db
 *.sqlite3
 
+# 本地调试产物 / 备份 / 个人材料
+my_test/
+*.bak-*
+简历-*.md
+面试准备.md
+
+# 未接入 DAG 的本地备选实现，不推送
+scheduler/notifiers.py
+
 # 基准结果保留（体积小，作为性能对比证据）
-!starrock/bench_results/*.json
+!starrocks/bench_results/*.json

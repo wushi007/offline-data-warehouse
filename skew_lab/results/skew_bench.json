@@ -1,0 +1,110 @@
+[
+  {
+    "label": "A. 原始 groupBy（复现倾斜）",
+    "elapsed_sec": 4.28,
+    "result_rows": 400005,
+    "all": {
+      "tasks": 432,
+      "dur_max_ms": 1936,
+      "dur_p50_ms": 13,
+      "dur_min_ms": 7,
+      "dur_sum_ms": 38133,
+      "skew_ratio": 148.92,
+      "shuffle_read_max_mb": 0.3,
+      "shuffle_read_p50_mb": 0.2,
+      "shuffle_read_skew": 1.97
+    },
+    "reduce": {
+      "tasks": 401,
+      "dur_max_ms": 90,
+      "dur_p50_ms": 12,
+      "dur_min_ms": 7,
+      "dur_sum_ms": 6396,
+      "skew_ratio": 7.5,
+      "shuffle_read_max_mb": 0.3,
+      "shuffle_read_p50_mb": 0.2,
+      "shuffle_read_skew": 1.92
+    }
+  },
+  {
+    "label": "B. 全量加盐（64 桶 × 全部 key）",
+    "elapsed_sec": 14.13,
+    "result_rows": 400005,
+    "all": {
+      "tasks": 422,
+      "dur_max_ms": 6426,
+      "dur_p50_ms": 75,
+      "dur_min_ms": 18,
+      "dur_sum_ms": 73949,
+      "skew_ratio": 85.68,
+      "shuffle_read_max_mb": 1.6,
+      "shuffle_read_p50_mb": 1.0,
+      "shuffle_read_skew": 1.63
+    },
+    "reduce": {
+      "tasks": 401,
+      "dur_max_ms": 332,
+      "dur_p50_ms": 74,
+      "dur_min_ms": 18,
+      "dur_sum_ms": 26032,
+      "skew_ratio": 4.49,
+      "shuffle_read_max_mb": 1.6,
+      "shuffle_read_p50_mb": 1.0,
+      "shuffle_read_skew": 1.6
+    }
+  },
+  {
+    "label": "C. 定向加盐（只对 >500,000 行的 key 加 64 桶）",
+    "elapsed_sec": 8.63,
+    "result_rows": 400005,
+    "all": {
+      "tasks": 632,
+      "dur_max_ms": 2131,
+      "dur_p50_ms": 17,
+      "dur_min_ms": 7,
+      "dur_sum_ms": 41309,
+      "skew_ratio": 125.35,
+      "shuffle_read_max_mb": 0.3,
+      "shuffle_read_p50_mb": 0.1,
+      "shuffle_read_skew": 5.24
+    },
+    "reduce": {
+      "tasks": 601,
+      "dur_max_ms": 114,
+      "dur_p50_ms": 16,
+      "dur_min_ms": 7,
+      "dur_sum_ms": 14162,
+      "skew_ratio": 7.12,
+      "shuffle_read_max_mb": 0.3,
+      "shuffle_read_p50_mb": 0.1,
+      "shuffle_read_skew": 5.22
+    }
+  },
+  {
+    "label": "D. AQE REBALANCE hint（自动拆倾斜分区）",
+    "elapsed_sec": 5.38,
+    "result_rows": 400005,
+    "all": {
+      "tasks": 34,
+      "dur_max_ms": 2645,
+      "dur_p50_ms": 256,
+      "dur_min_ms": 46,
+      "dur_sum_ms": 24813,
+      "skew_ratio": 10.31,
+      "shuffle_read_max_mb": 10.7,
+      "shuffle_read_p50_mb": 0.0,
+      "shuffle_read_skew": null
+    },
+    "reduce": {
+      "tasks": 13,
+      "dur_max_ms": 286,
+      "dur_p50_ms": 113,
+      "dur_min_ms": 46,
+      "dur_sum_ms": 2316,
+      "skew_ratio": 2.53,
+      "shuffle_read_max_mb": 10.7,
+      "shuffle_read_p50_mb": 1.2,
+      "shuffle_read_skew": 8.83
+    }
+  }
+]

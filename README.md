@@ -1,33 +1,32 @@
 # 电商离线数仓（Spark + Hive + Airflow）
 
 基于 [Kaggle eCommerce behavior](https://www.kaggle.com/datasets/mkechinov/ecommerce-behavior-data-from-multi-category-store)
-数据集（2019-Oct / 2019-Nov，约 4,700 万行行为日志）构建的**离线数仓**，覆盖 **ODS → DWD → DIM → DWS → ADS** 完整五层，
-31 天数据全链路跑通并通过跨层对账。
+数据集（2019-Oct / 2019-Nov，约 4,700 万行行为日志）构建的离线数仓，覆盖 ODS → DWD → DIM → DWS → ADS 五层。
+31 天数据全链路跑通，并通过跨层对账。
 
-> **运行环境**：一台 **16 GB 内存 / 1 TB 硬盘**的 Windows 笔记本，环境为 **WSL2 + Ubuntu 22.04**，
+> 运行环境：16 GB 内存 / 1 TB 硬盘的 Windows 笔记本，WSL2 + Ubuntu 22.04，
 > 单机跑完 4,700 万行行为日志。
 >
-> ⚠️ **这是一个 Spark SQL 数仓 Demo，环境配置并非通用方案，仅供思路参考。**
-> 所有内存与并发参数都是按「**这台机器只有 16 GB 内存**」这个前提调出来的 ——
-> 它正处在单机 Spark 演示的舒适区。
+> 本项目是 Spark SQL 数仓 Demo，环境配置不是通用方案，仅供思路参考。
+> 所有内存与并发参数都按「这台机器只有 16 GB 内存」这一前提调整，处于单机 Spark 演示的范围内。
 >
-> 具体来说：WSL2 默认只向虚拟机分配约一半物理内存（16 GB 宿主机上实测可见 **7.6 GB**），
-> 扣掉常驻的 HDFS / MySQL / Airflow（约 2.5 GB），留给 Spark 的实际余量只有 4~5 GB。
-> 这决定了三条硬性设计 —— **driver 内存 3g**、**单会话 flock 闸门**、**调度并发 = 1**，
+> WSL2 默认只向虚拟机分配约一半物理内存（16 GB 宿主机上实测可见 7.6 GB），
+> 扣掉常驻的 HDFS / MySQL / Airflow（约 2.5 GB）后，留给 Spark 的实际余量只有 4~5 GB。
+> 由此确定三条硬性设计：driver 内存 3g、单会话 flock 闸门、调度并发 = 1，
 > 详见 [内存与并发约束](#内存与并发约束)。
 
-> **第一次看这个项目？** 想跑起来 → [从零跑通](docs/GETTING_STARTED.md)；
-> 想懂代码 → [代码解析](docs/CODE_GUIDE.md)。
+> 第一次接触本项目时，先读 [从零跑通](docs/GETTING_STARTED.md)；
+> 了解代码结构读 [代码解析](docs/CODE_GUIDE.md)。
 
 ## 项目亮点
 
-- **一表一文件**：29 个 ETL 脚本按层组织（`etl/<层>/<表>.py`），每张表都能独立运行、独立重试，定位问题不用读整条链路
-- **真实 SCD2 拉链**：从事实表反推商品属性，日主导组合去噪 → 变更打点 → 折叠区间 → 开链/闭链，落地 172,794 个版本
-- **全链路幂等**：分区级 `INSERT OVERWRITE` + 确定性去重排序，同一输入重跑结果完全一致
-- **跨层对账**：购买次数、GMV、漏斗不变量、分时守恒等 6 项月度指标全绿
-- **DQC 质量闸门**：ODS/DWD 两层校验，失败即阻断下游调度
-- **Airflow 调度 + 告警**：一表一 task、串行闸门（flock）保证同一时刻只有一个 SparkSession；4+1 通道任务告警
-- **性能基准**：Spark vs StarRocks 双引擎对比（见 `docs/legacy/PERFORMANCE_BENCHMARK.md`）
+- 一表一文件：29 个 ETL 脚本按层组织（`etl/<层>/<表>.py`），每张表独立运行、独立重试，定位问题不需要读整条链路
+- SCD2 拉链：从事实表反推商品属性，日主导组合去噪 → 变更打点 → 折叠区间 → 开链/闭链，落地 172,794 个版本
+- 全链路幂等：分区级 `INSERT OVERWRITE` + 确定性去重排序，同一输入重跑结果完全一致
+- 跨层对账：购买次数、GMV、漏斗不变量、分时守恒等 6 项月度指标全部通过
+- DQC 质量闸门：ODS/DWD 两层校验，失败即阻断下游调度
+- Airflow 调度与告警：一表一 task，flock 串行闸门保证同一时刻只有一个 SparkSession；4+1 通道任务告警
+- 性能基准：Spark 与 StarRocks 双引擎对比（见 `docs/legacy/PERFORMANCE_BENCHMARK.md`）
 
 ## 架构
 
@@ -56,32 +55,30 @@
           └──────────────┘
 ```
 
-**关键设计取舍**：`event_type / behavior_type / is_purchase / event_hour / user_session` 作为**退化维度**直接进事实表，
-DWS 聚合因此不需要 JOIN 维度表；而 ADS 漏斗跨商品精确去重 UV，必须回 DWD 计算。
+关键设计取舍：`event_type / behavior_type / is_purchase / event_hour / user_session` 作为退化维度直接进入事实表，
+DWS 聚合因此不需要 JOIN 维度表；ADS 漏斗需要跨商品精确去重 UV，必须回到 DWD 计算。
 
 ## 内存与并发约束
 
-这一节的参数不是「调优结果」，而是**在 16 GB / WSL2 环境下的生存底线** ——
-理解了它，才知道为什么代码里有那么多「串行」和「单会话」的限制。
+本节参数不是调优结果，而是 16 GB / WSL2 环境下的必要约束，代码中的串行和单会话限制都由此而来。
 
-**可用内存有多少**：宿主 16 GB，但 WSL2 默认只分配约一半（`/etc/wsl.conf` 未调优时
-约为物理内存的 50%，实测可见 **7.6 GB**）。再扣掉常驻的 HDFS + MySQL + Airflow（约 2.5 GB），
-**留给 Spark 的实际余量只有 4~5 GB**。
+可用内存：宿主机 16 GB，WSL2 默认只分配约一半（`/etc/wsl.conf` 未调优时
+约为物理内存的 50%，实测可见 7.6 GB）。扣掉常驻的 HDFS + MySQL + Airflow（约 2.5 GB），
+留给 Spark 的实际余量只有 4~5 GB。
 
-**由此决定的三条硬性设计**：
+由此确定三条硬性设计：
 
 | 约束 | 取值 | 为什么 |
 |---|---|---|
-| **driver 内存** | `3g`（`get_spark(memory=...)`） | 按机器可用内存给，不是按「任务看起来大」给。给到 `6g` 时 JVM 会被内核 OOM killer 杀掉 |
-| **同一时刻一个 SparkSession** | `etl/run_locked.sh` 的 `flock` 闸门 | 两个会话并存会 OOM。闸门跨 DAG、跨手动执行都生效 |
-| **调度并发 = 1** | DAG 的 `max_active_tasks=1` + `max_active_runs=1` | 与上面闸门是双保险：DAG 级管住本 DAG，闸门管住整机 |
+| driver 内存 | `3g`（`get_spark(memory=...)`） | 按机器可用内存确定，不按任务规模。给到 `6g` 时 JVM 会被内核 OOM killer 杀掉 |
+| 同一时刻一个 SparkSession | `etl/run_locked.sh` 的 `flock` 闸门 | 两个会话并存会 OOM，闸门对 DAG 和手动执行都生效 |
+| 调度并发 = 1 | DAG 的 `max_active_tasks=1` + `max_active_runs=1` | 与上面的闸门构成双保险：DAG 级管住本 DAG，闸门管住整机 |
 
-**判据是「分区粒度匹配到达粒度」**：数据是**按天批量**落的（不是小时流），
-DWD 重跑一天只要约 45 秒。所以 31 天就是 31 个日分区，重跑只覆盖当天 ——
-没有为了「看起来更快」去做小时级分区，那只会把 31 个目录变成 744 个碎分区。
+分区粒度与数据到达粒度一致：数据按天批量落盘，不是小时流，DWD 重跑一天约 45 秒。
+31 天对应 31 个日分区，重跑只覆盖当天。项目没有采用小时级分区，否则 31 个目录会变成 744 个碎分区。
 
-**换到更大内存的机器**：可以放开 `driver.memory`、提高 `max_active_tasks`，
-但**不建议去掉 flock 闸门** —— 它是「重跑安全」的一部分，不只是内存保护。
+换到更大内存的机器时，可以放开 `driver.memory`、提高 `max_active_tasks`，
+但不建议去掉 flock 闸门，它也是重跑安全的一部分，不只是内存保护。
 
 ## 快速开始
 
@@ -89,17 +86,17 @@ DWD 重跑一天只要约 45 秒。所以 31 天就是 31 个日分区，重跑�
 
 | 组件 | 版本 | 说明 |
 |---|---|---|
-| 操作系统 | **WSL2 + Ubuntu 22.04** | 其他 Linux 发行版同理 |
-| **内存** | **16 GB**（宿主） | WSL2 实际可见约 7.6 GB，见 [内存与并发约束](#内存与并发约束) |
-| **硬盘** | **1 TB** | 源 CSV 约 9 GB，数仓中间结果约 15 GB |
+| 操作系统 | WSL2 + Ubuntu 22.04 | 其他 Linux 发行版同理 |
+| 内存 | 16 GB（宿主） | WSL2 实际可见约 7.6 GB，见 [内存与并发约束](#内存与并发约束) |
+| 硬盘 | 1 TB | 源 CSV 约 9 GB，数仓中间结果约 15 GB |
 | JDK | 17 | Spark 3.5 要求 |
 | Spark | 3.5.9 | PySpark 3.5.8 |
 | Hadoop (HDFS) | 3.4.3 | 只用 HDFS，不需要 MR |
 | Hive Metastore | Spark 内嵌 | 用于外部表注册 |
 | Python | 3.10 | 3.9+ 均可 |
 
-**最低可行配置**：JDK 17 + Spark + HDFS + Python 环境。
-MySQL / Airflow / StarRocks 都是可选组件，不影响主链路跑通。
+最低可行配置：JDK 17 + Spark + HDFS + Python 环境。
+MySQL / Airflow / StarRocks 均为可选组件，不影响主链路跑通。
 
 ```bash
 # 1. 安装依赖
@@ -122,10 +119,10 @@ hdfs dfs -put 2019-Oct.csv /home/warehouse/hadoop-data/eCommerce_behavior/
 ./run.sh check --start 2019-10-01 --end 2019-10-31
 ```
 
-> 需要按你的环境调整的只有一处：`config/config.py` 里的 HDFS 数据路径。
-> Java / Spark / Hadoop / venv 的位置由 `run.sh` 自动探测（探测不到时用
-> `SPARK_HOME=... PYTHON=... ./run.sh ...` 显式指定）。
-> 详细步骤与常见报错见 [从零跑通](docs/GETTING_STARTED.md)。
+需要按环境调整的只有一处：`config/config.py` 里的 HDFS 数据路径。
+Java / Spark / Hadoop / venv 的位置由 `run.sh` 自动探测，探测不到时用
+`SPARK_HOME=... PYTHON=... ./run.sh ...` 显式指定。
+详细步骤与常见报错见 [从零跑通](docs/GETTING_STARTED.md)。
 
 ### 常用命令
 
@@ -146,27 +143,56 @@ hdfs dfs -put 2019-Oct.csv /home/warehouse/hadoop-data/eCommerce_behavior/
 | 层 | 表数 | 代表表规模 |
 |---|---|---|
 | ODS | 1 | `ods_event_log` 47,017,436 行 |
-| DWD | 2 | `dwd_event_fact` **42,413,557 行** |
+| DWD | 2 | `dwd_event_fact` 42,413,557 行 |
 | DIM | 5 | `dim_product_scd2` 172,794 版本 / `dim_user` 3,022,290 |
 | DWS | 4 | `dws_user_session_daily` 9,280,709 行 |
 | ADS | 7 | `ads_user_rfm_snapshot` 347,118 用户 |
 
-**对账结果（全绿）**
+对账结果（全部通过）：
 
 ```
-✅ 购买次数守恒 DWD=DWS用户=DWS商品=DWS会话=ADS: 742,773
-✅ GMV 守恒     DWD=DWS用户=DWS商品=ADS: 229,933,212.63
-✅ 漏斗不变量（每日 view_uv 为上游最大值）: 0 天违规
-✅ SCD2 每商品单一当前版本: 0 个违规
-✅ 分时守恒 DWS=ADS=DWD明细: PV 42,413,557 / 购买 742,773
-✅ 留存不变量（D+n 人数 ≤ D0）: 0 天违规
+OK 购买次数守恒 DWD=DWS用户=DWS商品=DWS会话=ADS: 742,773
+OK GMV 守恒     DWD=DWS用户=DWS商品=ADS: 229,933,212.63
+OK 漏斗不变量（每日 view_uv 为上游最大值）: 0 天违规
+OK SCD2 每商品单一当前版本: 0 个违规
+OK 分时守恒 DWS=ADS=DWD明细: PV 42,413,557 / 购买 742,773
+OK 留存不变量（D+n 人数 ≤ D0）: 0 天违规
 ```
 
-**业务洞察**
+业务洞察：
 
-- **RFM 二八法则显著**：「重要价值客户」占购买用户的 **12.2%**，贡献 **55.6%** 的 GMV
-- **留存**（基准日 10-16，D0 = 230,199）：D+1 **17.68%** / D+3 **13.20%** / D+7 **10.74%**，单调递减；月末右删失记 NULL 而非 0
-- **分时流量峰谷比 13.76×**：上午(7-12) 转化最高（贡献 41.04% 订单），晚间(19-23) 客单价最高（354 元）
+- RFM 分布符合二八法则：「重要价值客户」占购买用户的 12.2%，贡献 55.6% 的 GMV
+- 留存（基准日 10-16，D0 = 230,199）：D+1 17.68% / D+3 13.20% / D+7 10.74%，单调递减；月末右删失记 NULL 而非 0
+- 分时流量峰谷比 13.76×：上午(7-12) 转化最高（贡献 41.04% 订单），晚间(19-23) 客单价最高（354 元）
+
+## 源数据质量观察（2019-10-01 ~ 11-30，61 天）
+
+将窗口扩展到 61 天检查源数据，发现三类现象。这些现象均属采集侧或源数据性质，不是业务波动，也不是计算错误。
+
+### 1. 采集漏数：purchase 事件成片缺小时
+
+11-14 ~ 11-17 四天里 `view` / `cart` 都覆盖满 24 小时，`purchase` 只覆盖 19 / 0 / 8 / 21 小时（11-15 原始 purchase 全天 0 条）。这不是业务上无人购买，而是采集缺失。
+
+> 判别方法：按日期 × 事件类型 × 小时统计覆盖小时数。缺小时的情况不会像总量那样被高流量日掩盖。
+
+### 2. 采集换挡：11-14 ~ 11-17 的 UV 突增（11-18 又换回）
+
+同一套采集系统在 11-14 ~ 11-17 更换了采集档位，有四条证据：
+
+| 证据 | 观测 |
+|---|---|
+| 切换边界 | 切换发生在自然日边界，前后相邻日完全正常（业务高峰通常缓升缓降、跨午夜延续） |
+| 放大倍数 | view 3.13× / cart 5.96× / purchase 8.10×，三者不一致（真实业务变化应同比例） |
+| 分布形状 | 每用户事件数整条分布平移、形状不变（p50 3→6、p90 16→32、p99 52→106），不是尾部抬高 |
+| 用户池 | 与前后日的重叠率接近随机期望，排除换用户群或换数据源 |
+
+> 从数据文件本身无法确定上游更换档位的原因，只能确认这是采集侧变化，不是业务波动。
+
+### 3. 语义 / 一致性：源数据自带，不是算错
+
+- 漏斗倒挂在源数据中已经存在：61 天里有 22 天 `purchase_uv > cart_uv`（转化率最大 1.763；会话级 21 天 > 1，最大 1.324）。一部分与上面的 purchase 缺失、cart 换挡相关，另一部分是加购与下单可跨天的窗口语义，属于源数据特征。
+- 存在 `price = 0` 的购买事件：有销量而零金额的情况在源数据内部自洽，不是丢单。
+- 存在当日无浏览的购买：购买 UV 可以超过曝光 UV（曝光只统计 `view`），因为用户当天不浏览也能下单。这是 61 天观察窗口截断和跨天行为的结果。
 
 ## 目录结构
 
@@ -204,19 +230,21 @@ hdfs dfs -put 2019-Oct.csv /home/warehouse/hadoop-data/eCommerce_behavior/
 
 | 文档 | 内容 |
 |---|---|
-| **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** | **从零跑通**：环境要求、依赖安装、启 HDFS、改配置、建表、跑数据、验证结果、11 个常见报错 |
-| **[docs/CODE_GUIDE.md](docs/CODE_GUIDE.md)** | **代码解析**：五层架构、每层实现细节、SCD2 算法、幂等机制、6 个关键设计决策 |
+| [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) | 从零跑通：环境要求、依赖安装、启 HDFS、改配置、建表、跑数据、验证结果、11 个常见报错 |
+| [docs/CODE_GUIDE.md](docs/CODE_GUIDE.md) | 代码解析：五层架构、每层实现细节、SCD2 算法、幂等机制、6 个关键设计决策 |
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | 日常操作手册 |
-| [docs/incremental/WAREHOUSE_BUILD.md](docs/incremental/WAREHOUSE_BUILD.md) | **构建记录**：19 张表清单、分层依赖、SCD2 设计、对账结果、交叉验证 |
+| [docs/incremental/WAREHOUSE_BUILD.md](docs/incremental/WAREHOUSE_BUILD.md) | 构建记录：19 张表清单、分层依赖、SCD2 设计、对账结果、交叉验证 |
 | [docs/incremental/ALERTS.md](docs/incremental/ALERTS.md) | 告警机制：4+1 通道、事件分级、台账字段 |
 | [docs/legacy/DWS_ADS_TABLES.md](docs/legacy/DWS_ADS_TABLES.md) | DWS/ADS 数据字典（34 天实测数字） |
 | [docs/legacy/PERFORMANCE_BENCHMARK.md](docs/legacy/PERFORMANCE_BENCHMARK.md) | StarRocks vs Spark 查询性能基准 |
 
 ## 已知限制
 
-- **SCD2 时间精度到天**：源数据只有「观测时刻」没有「变更时刻」，`dw_start_date` 无法更细
-- **单日 UV 与旧实现有 0.0x% 偏移**：本次固定了确定性去重排序，旧实现保留哪条不确定；月度守恒指标完全对得平
-- **`dwd_event_dirty` 为 0 行**是正常的：源数据本身无脏数据，隔离表与规则保留待用
+- SCD2 时间精度到天：源数据只有「观测时刻」没有「变更时刻」，`dw_start_date` 无法更细
+- 单日 UV 与旧实现有 0.0x% 偏移：本次固定了确定性去重排序，旧实现保留哪条不确定；月度守恒指标完全对得平
+- `dwd_event_dirty` 为 0 行是正常现象：源数据本身无脏数据，隔离表与规则保留待用
+- 源数据自带漏斗倒挂 / 零金额 / 无浏览购买：与上表「漏斗不变量 0 天违规」（只要求 `view_uv` 为上游最大值）不矛盾，
+  属源侧特征，详见 [源数据质量观察](#源数据质量观察2019-10-01--11-3061-天)
 
 ## 许可
 

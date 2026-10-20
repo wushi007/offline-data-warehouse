@@ -1,8 +1,8 @@
 # DWS / ADS 层数据字典
 
 > 数据区间：2019-10-01 ~ 2019-11-03（34 天），源明细 `dwd_event_fact` 46,908,364 行。
-> 行数/样例从 **StarRocks**（库 `dwd`）实测；Spark 侧表结构与行数完全一致（同口径，已验证）。
-> 四类事件枚举：`view` / `cart` / `remove_from_cart` / `purchase`；源 purchase 共 **809,238** 行，总 GMV **249,929,113.38**。
+> 行数与样例来自 StarRocks（库 `dwd`）实测；Spark 侧表结构与行数一致（同口径，已验证）。
+> 四类事件枚举：`view` / `cart` / `remove_from_cart` / `purchase`；源 purchase 共 809,238 行，总 GMV 249,929,113.38。
 
 ---
 
@@ -11,7 +11,7 @@
 数据流：`dwd_event_fact` → 按天 GROUP BY → DWS。
 
 ### 1.1 `dws_user_session_daily` —— 日 × 用户 × 会话
-行数 **10,278,076**（34 天所有 用户×会话 组合）
+行数 10,278,076（34 天所有用户×会话组合）
 
 | 列 | 类型 | 口径 |
 |---|---|---|
@@ -31,7 +31,7 @@ user_id=293291933  session=85e3fda6-…  view=1  cart=0 purchase=0 remove=0 时�
 ```
 
 ### 1.2 `dws_product_daily` —— 日 × 商品
-行数 **2,521,056**（34 天 × 当日有行为的商品）
+行数 2,521,056（34 天 × 当日有行为的商品）
 
 | 列 | 类型 | 口径 |
 |---|---|---|
@@ -52,7 +52,7 @@ product=1002099  cat=2053013555631882655  brand=samsung exposure_uv=576 cart_uv=
 ```
 
 ### 1.3 `dws_user_behavior_daily` —— 日 × 用户
-行数 **7,169,053**（34 天 × 当日活跃用户）
+行数 7,169,053（34 天 × 当日活跃用户）
 
 | 列 | 类型 | 口径 |
 |---|---|---|
@@ -68,19 +68,18 @@ product=1002099  cat=2053013555631882655  brand=samsung exposure_uv=576 cart_uv=
 user_id=295655799  active=1  purchase_amount=0.0  product_cnt=0  purchase_cnt=0
 ```
 
-**DWS 对账**（三张 purchase 计数守恒）：
-- `dws_user_session_daily.purchase_cnt` 合计 == `dws_product_daily.sales_cnt` 合计
-  == `dws_user_behavior_daily.purchase_cnt` 合计 == 源 purchase **809,238**
-- 交叉守恒：`dws_product_daily.sales_amount` 合计 == `dws_user_behavior_daily.purchase_amount` 合计 == **249,929,113.38**
+DWS 对账（三张表 purchase 计数守恒）：
+- `dws_user_session_daily.purchase_cnt` 合计 == `dws_product_daily.sales_cnt` 合计 == `dws_user_behavior_daily.purchase_cnt` 合计 == 源 purchase 809,238
+- 交叉守恒：`dws_product_daily.sales_amount` 合计 == `dws_user_behavior_daily.purchase_amount` 合计 == 249,929,113.38
 
 ---
 
 ## 二、ADS 应用层（5 张报表表，4 张日报 + 1 张快照）
 
-数据流：DWS → ADS（漏斗/RFM 回 DWD 精确去重）。
+数据流：DWS → ADS（漏斗 / RFM 回 DWD 精确去重）。
 
 ### 2.1 `ads_trade_daily` —— 交易日报（源 `dws_user_behavior_daily`）
-行数 **34**（每天 1 行）
+行数 34（每天 1 行）
 
 | 列 | 类型 | 口径 |
 |---|---|---|
@@ -97,10 +96,10 @@ user_id=295655799  active=1  purchase_amount=0.0  product_cnt=0  purchase_cnt=0
 2019-11-02  gmv=6,389,578.47  order=21,863  buyer=16,187  AOV=292.26  arppu=394.74
 2019-11-01  gmv=6,949,402.19  order=22,457  buyer=16,372  AOV=309.45  arppu=424.47
 ```
-全期合计：GMV **249,929,113.38**，订单 **809,238**。
+全期合计：GMV 249,929,113.38，订单 809,238。
 
 ### 2.2 `ads_conversion_funnel_daily` —— 转化漏斗（源 `dwd_event_fact` 精确去重 UV）
-行数 **34**（每天 1 行）
+行数 34（每天 1 行）
 
 | 列 | 类型 | 口径 |
 |---|---|---|
@@ -115,10 +114,10 @@ user_id=295655799  active=1  purchase_amount=0.0  product_cnt=0  purchase_cnt=0
 view_uv=190,037  cart_uv=8,771  purchase_uv=14,064
 view→cart=4.6%  view→purchase=7.4%  cart→purchase=160.3%
 ```
-> **关键洞察**：`cart_to_purchase_rate > 100%` 意味着大量用户**直接购买、绕过加购环节**（真实业务特征），因此漏斗不变量校验用 `view_uv >= cart_uv 且 view_uv >= purchase_uv`（浏览是最上游）。
+> `cart_to_purchase_rate > 100%` 表示大量用户直接购买、绕过加购环节，属于真实业务特征。因此漏斗不变量校验使用 `view_uv >= cart_uv` 且 `view_uv >= purchase_uv`（浏览为最上游）。
 
 ### 2.3 `ads_product_hot_rank_daily` —— 商品热榜 Top100（源 `dws_product_daily`）
-行数 **3,400**（34 天 × 100）
+行数 3,400（34 天 × 100）
 
 | 列 | 类型 | 口径 |
 |---|---|---|
@@ -135,10 +134,10 @@ rank=3  product=1004249  apple     sales=262   amount=189,782.80  uv=4,542
 rank=4  product=1005135  apple     sales=112   amount=185,575.10  uv=2,278
 rank=5  product=1004767  samsung   sales=734   amount=177,547.46  uv=7,577
 ```
-> 观察：热榜被 **apple** 主导（全期稳定），个别高销量商品（samsung 1004767）靠量上榜。
+> 热榜以 apple 为主导（全期稳定），个别高销量商品（samsung 1004767）靠销量上榜。
 
 ### 2.4 `ads_session_behavior_daily` —— 会话行为（源 `dws_user_session_daily`）
-行数 **34**（每天 1 行）
+行数 34（每天 1 行）
 
 | 列 | 类型 | 口径 |
 |---|---|---|
@@ -155,7 +154,7 @@ rank=5  product=1004767  samsung   sales=734   amount=177,547.46  uv=7,577
 ```
 
 ### 2.5 `ads_user_rfm_snapshot` —— 用户 RFM 分群（源 `dwd_event_fact` purchase 明细，全量快照）
-行数 **373,611**（全期购买用户）
+行数 373,611（全期购买用户）
 
 | 列 | 类型 | 口径 |
 |---|---|---|
@@ -165,12 +164,12 @@ rank=5  product=1004767  samsung   sales=734   amount=177,547.46  uv=7,577
 | `m_amount` | double | Monetary = 累计购买金额 |
 | `rfm_seg` | varchar(32) | 8 分群：`AVG(f_cnt)/AVG(m_amount)` 阈值 + R≤30/R>30 两档 |
 
-**分群分布（用户数 / GMV）**：
+分群分布（用户数 / GMV）：
 
 | 分群 | 用户数 | 占比 | GMV |
 |---|---|---|---|
 | 一般价值客户 | 243,265 | 65.1% | 47,784,401 |
-| **重要价值客户** | 45,315 | 12.1% | **138,958,136（占全期 GMV 55.6%）** |
+| 重要价值客户 | 45,315 | 12.1% | 138,958,136（占全期 GMV 55.6%） |
 | 重要发展客户 | 38,291 | 10.2% | 45,936,660 |
 | 重要保持客户 | 25,532 | 6.8% | 9,169,269 |
 | 一般挽留客户 | 17,275 | 4.6% | 3,339,845 |
@@ -178,7 +177,7 @@ rank=5  product=1004767  samsung   sales=734   amount=177,547.46  uv=7,577
 | 重要挽留客户 | 717 | 0.2% | 1,471,849 |
 | 一般保持客户 | 536 | 0.1% | 191,013 |
 
-> **业务洞察**：12.1% 的「重要价值客户」贡献 55.6% 的 GMV —— 二八法则显著，运营重点应聚焦该群体。
+> 12.1% 的重要价值客户贡献 55.6% 的 GMV，运营重点可放在该群体。
 
 样例：
 ```
@@ -200,16 +199,16 @@ dwd_event_fact (46.9M)
 ```
 
 对账不变量：
-1. **总量守恒**：3 张 DWS 的 purchase 计数 == 源 **809,238**
-2. **交叉守恒**：`dws_product_daily.sales_amount` == `dws_user_behavior_daily.purchase_amount` == `ads_trade_daily.gmv` == **249,929,113.38**
-3. **漏斗不变量**：逐日 `view_uv >= cart_uv 且 view_uv >= purchase_uv`（0 违规）
-4. **行数校验**：热榜 34×100=3,400；trade/funnel/session 各 34；RFM == 购买用户 373,611
+1. 总量守恒：3 张 DWS 的 purchase 计数 == 源 809,238
+2. 交叉守恒：`dws_product_daily.sales_amount` == `dws_user_behavior_daily.purchase_amount` == `ads_trade_daily.gmv` == 249,929,113.38
+3. 漏斗不变量：逐日 `view_uv >= cart_uv` 且 `view_uv >= purchase_uv`（0 违规）
+4. 行数校验：热榜 34×100=3,400；trade/funnel/session 各 34；RFM == 购买用户 373,611
 
 ---
 
 ## 四、口径说明
 
-- **UV** 一律 `COUNT(DISTINCT user_id)`；漏斗跨商品去重，避免商品级 UV 累加重复计。
-- **销量/销售额**只统计 `purchase` 行为。
-- 两引擎（Spark / StarRocks）同结构同口径，行数与关键指标完全一致，可互相对账。
+- UV 一律 `COUNT(DISTINCT user_id)`；漏斗跨商品去重，避免商品级 UV 累加重复计数。
+- 销量与销售额只统计 `purchase` 行为。
+- 两引擎（Spark / StarRocks）同结构同口径，行数与关键指标一致，可互相核对。
 - Spark 侧列类型为 parquet 对应类型（`varchar→string`、`double→double`、`bigint→bigint`）。

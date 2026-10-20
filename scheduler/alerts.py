@@ -1,21 +1,9 @@
 # -*- coding: utf-8 -*-
-"""
-alerts.py — 任务告警通知（被 DAG 的 on_failure_callback / on_retry_callback 调用）
-==================================================================================
-设计原则
---------
-1. **绝不抛异常**：告警本身出问题不能把任务状态搞乱，所有通道逐个 best-effort、失败即静默降级。
-2. **分级推送**：只有「质量阻断 / 失败 / 超时」推给人；「重试中」只进台账（避免重试噪音淹没真问题）。
-3. **每条告警都自带行动信息**：重跑命令 + 日志尾部 —— 收到就能直接动手，不用再去翻 UI。
+"""任务告警通知，供 DAG 的 on_failure_callback / on_retry_callback 调用。
 
-通道（前两个默认开，后两个靠环境变量启用）
-------------------------------------------
-① 本地台账       scheduler/alert_records/alerts-YYYY-MM-DD.jsonl   （结构化，可 grep/jq）
-② Windows 告警文件 /mnt/c/Users/<用户名>/Documents/数仓告警.txt      （WSL 里能写到 Windows，打开就能看；
-                  目录不存在时自动跳过；可用 DW_ALERT_WIN_FILE 覆盖）
-③ 桌面弹窗       best-effort（装了 BurntToast 才有 toast；否则跳过。刻意不用阻塞式 MessageBox）
-④ HTTP Webhook   DW_ALERT_WEBHOOK=<企业微信/钉钉/飞书 机器人 URL>
-⑤ 邮件 SMTP      DW_ALERT_SMTP_HOST / _PORT / _USER / _PASS / _TO（都设了才启用）
+通道：本地 jsonl 台账、Windows 告警文件、桌面 toast、HTTP webhook、
+飞书机器人（卡片/文本）、SMTP 邮件；除前两项外均由环境变量启用。
+各通道失败静默降级，告警异常不影响任务状态；retry 事件只进台账不推送。
 """
 
 import argparse
@@ -23,18 +11,27 @@ import json
 import os
 import re
 import subprocess
+import sys
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# 加载项目根目录 .env（独立运行时也能读到告警配置）
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+try:
+    from config.env import load_env
+
+    load_env()
+except ImportError:
+    pass
+
 AIRFLOW_HOME = Path(os.path.expanduser(os.environ.get("AIRFLOW_HOME", "~/airflow")))
-# 告警记录放在**项目内**（scheduler/alert_records/），不放 AIRFLOW_HOME：
-#   ① 跟代码同仓，一起备份/迁移，不随 Airflow 重装丢失；
-#   ② 目录名特意避开 `alerts`——本模块就叫 alerts.py，同名目录会和它撞（Python 导入歧义）。
+# 台账放项目内，随代码一起迁移；目录名避开 alerts，防止与 alerts.py 的导入冲突。
 ALERT_DIR = Path(__file__).resolve().parent / "alert_records"
 LOG_DIR = AIRFLOW_HOME / "logs"
-# Windows 告警文件（WSL 专用通道）：目录不存在时自动跳过，所以非 WSL 环境无副作用。
-# 默认按当前用户名推导，可用 DW_ALERT_WIN_FILE 覆盖。
+# WSL 专用通道，目录不存在时跳过；可用 DW_ALERT_WIN_FILE 覆盖路径。
 _DEFAULT_WIN_FILE = "/mnt/c/Users/{}/Documents/数仓告警.txt".format(os.environ.get("USER", "user"))
 WIN_ALERT_FILE = Path(os.environ.get("DW_ALERT_WIN_FILE", _DEFAULT_WIN_FILE))
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -43,34 +40,25 @@ LOCK_WRAPPER = str(PROJECT_ROOT / "etl" / "run_locked.sh")
 LOG_TAIL_LINES = 15
 
 # ---------------- 保留策略 ----------------
-# 台账按天累积（一条失败记录可能几 KB，因为带日志尾部），不清理会无限长。
-# 规则：台账只留最近 KEEP_DAYS 天；Windows 通知文件超过 WIN_MAX_KB 就截断保留最新部分。
-# 都可用环境变量覆盖：DW_ALERT_KEEP_DAYS / DW_ALERT_TXT_MAX_KB
+# 台账保留 KEEP_DAYS 天，Windows 文件超过 WIN_MAX_KB 截断；环境变量可覆盖。
 KEEP_DAYS = int(os.environ.get("DW_ALERT_KEEP_DAYS", "30"))
 WIN_MAX_KB = int(os.environ.get("DW_ALERT_TXT_MAX_KB", "512"))
 _LEDGER_RE = re.compile(r"alerts-(\d{4}-\d{2}-\d{2})\.jsonl$")
-_pruned_on = None          # 本进程内已执行过清理的日期，避免每条告警都扫目录
+_pruned_on = None          # 本进程已清理的日期，避免每条告警都扫目录
 
-# 事件分级：只有这几个会"推给人"
+# 事件分级：只有 PUSH_EVENTS 中的事件推送给人
 EVENTS = {
-    "quality_block": "🔴 数据质量阻断（已拦住下游）",
-    "quality_warn":  "🟠 数据质量异常（值超阈值，未阻断下游）",
-    "failure":       "🔴 任务失败（重试已耗尽）",
-    "timeout":       "🟠 任务超时（疑似卡死）",
-    "retry":         "🟡 任务重试中",
+    "quality_block": "数据质量阻断（已拦住下游）",
+    "quality_warn":  "数据质量异常（值超阈值，未阻断下游）",
+    "failure":       "任务失败（重试已耗尽）",
+    "timeout":       "任务超时（疑似卡死）",
+    "retry":         "任务重试中",
 }
-# quality_warn 与 quality_block 的区别：前者是叶子节点上的**指标异常**（如 GMV 波动超阈值），
-# 数据已经写出来了、也没有下游被拦；后者是闸门任务不通过、下游确实没跑。
-# 分开是为了让收到告警的人能判断"要不要立刻动手"。
+# quality_warn 为叶子节点指标异常（数据已写出、无下游被拦）；quality_block 为闸门失败、下游未跑。
 PUSH_EVENTS = {"quality_block", "quality_warn", "failure", "timeout"}
 
-
-# ---------------- 上下文提取 ----------------
 def _log_tail(context, keep=LOG_TAIL_LINES):
-    """按 Airflow 日志布局取任务日志尾部：logs/dag_id=/run_id=/task_id=/attempt=N.log。
-
-    布局是约定（随版本可能变），所以取不到就返回 None —— 告警降级为只给 UI 链接，不影响送达。
-    """
+    """取任务日志尾部（logs/dag_id=/run_id=/task_id=/attempt=N.log），取不到返回 None。"""
     try:
         ti = context.get("ti") or context.get("task_instance")
         dag_id = context["dag"].dag_id
@@ -91,7 +79,6 @@ def _log_tail(context, keep=LOG_TAIL_LINES):
 
 
 def _rerun_cmd(context):
-    """给出两条重跑路径：Airflow 单任务重跑 / 直接跑底层脚本。"""
     try:
         dag_id = context["dag"].dag_id
         task_id = context["task"].task_id
@@ -101,7 +88,6 @@ def _rerun_cmd(context):
                 f"# 或直接跑（绕过 Airflow）：\n{raw}")
     except Exception:
         return "(取重跑命令失败，去 UI 重跑该 task)"
-
 
 def _build_record(context, event, extra):
     try:
@@ -115,7 +101,7 @@ def _build_record(context, event, extra):
             "task_id": context["task"].task_id,
             "ds": context.get("ds"),
             "run_id": context.get("run_id"),
-            # 回调的 context 里 try_number 常为 None（键存在但没填），从 ti 兜底取
+            # 回调 context 的 try_number 常为 None，从 ti 兜底取
             "try_number": context.get("try_number") or getattr(ti, "try_number", None),
             "reason": context.get("reason"),
             "exception": f"{type(exc).__name__}: {exc}" if exc else None,
@@ -130,8 +116,6 @@ def _build_record(context, event, extra):
     rec["log_tail"] = _log_tail(context)
     return rec
 
-
-# ---------------- 通道 ----------------
 def _write_ledger(rec):
     ALERT_DIR.mkdir(parents=True, exist_ok=True)
     f = ALERT_DIR / f"alerts-{datetime.now().strftime('%Y-%m-%d')}.jsonl"
@@ -165,7 +149,7 @@ def _windows_file(rec):
 
 
 def _windows_toast(rec):
-    """best-effort 桌面弹窗：装了 BurntToast 才有；没有就跳过（绝不用阻塞式 MessageBox）。"""
+    """桌面弹窗，best-effort：未安装 BurntToast 时跳过，不使用阻塞式 MessageBox。"""
     title = f"{rec.get('level')} | {rec.get('task_id')}"
     body = f"{rec.get('ds')}  {rec.get('exception') or rec.get('reason') or ''}"
     ps = (f"if (Get-Module -ListAvailable -Name BurntToast) {{"
@@ -182,7 +166,7 @@ def _webhook(rec):
     url = os.environ.get("DW_ALERT_WEBHOOK")
     if not url:
         return
-    # 企业微信/钉钉/飞书机器人都是 POST JSON；这里用最通用的 text 结构（三家都认 content/text）
+    # 企业微信 / 钉钉格式；飞书格式不同，其地址应填 DW_ALERT_FEISHU_WEBHOOK。
     payload = {"msgtype": "text", "text": {"content": _human(rec)}}
     try:
         req = urllib.request.Request(
@@ -191,6 +175,125 @@ def _webhook(rec):
         urllib.request.urlopen(req, timeout=10).read()
     except Exception:
         pass
+
+
+# ---------------- 飞书（Feishu / Lark）自定义机器人 ----------------
+# 格式为 {"msg_type":"text","content":{"text":...}}；业务失败仍返回 HTTP 200，须检查 body。
+# 配置项写在 airflow_env.sh 的 gen_env_file；STYLE 取 card（默认）或 text。
+import base64
+import hashlib
+import hmac
+import time
+
+# 卡片头部配色：红=失败/阻断，橙=异常/超时，灰=信息
+FEISHU_TEMPLATE = {
+    "quality_block": "red",
+    "failure":       "red",
+    "quality_warn":  "orange",
+    "timeout":       "orange",
+    "retry":         "grey",
+}
+
+
+def _feishu_conf():
+    return (
+        os.environ.get("DW_ALERT_FEISHU_WEBHOOK", "").strip(),
+        os.environ.get("DW_ALERT_FEISHU_SECRET", "").strip(),
+        (os.environ.get("DW_ALERT_FEISHU_STYLE", "card") or "card").strip().lower(),
+    )
+
+
+def gen_sign(timestamp, secret):
+    """飞书加签：以 f"{timestamp}\\n{secret}" 为 HMAC key，对空串求 HmacSHA256 后 Base64。"""
+    string_to_sign = f"{timestamp}\n{secret}"
+    hmac_code = hmac.new(string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
+    return base64.b64encode(hmac_code).decode("utf-8")
+
+
+def _feishu_post(url, payload, timeout=10):
+    """POST 并检查响应 body 的 code：飞书业务失败时同样返回 HTTP 200。"""
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json; charset=utf-8"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = json.loads(resp.read().decode("utf-8") or "{}")
+    code = body.get("code", body.get("StatusCode", -1))
+    return code == 0, f"code={code} msg={body.get('msg') or body.get('StatusMessage') or ''}"
+
+
+def _feishu_text(rec):
+    """纯文本消息（卡片失败时的兜底）。首行含「数仓告警」以匹配机器人关键词。"""
+    lines = [f"【数仓告警】{rec.get('level', rec.get('event', '?'))}",
+             f"任务   : {rec.get('dag_id', '-')} / {rec.get('task_id', '-')}",
+             f"数据日 : {rec.get('ds') or '-'}    重试次数: {rec.get('try_number')}"]
+    if rec.get("exception"):
+        lines.append(f"异常   : {rec['exception']}")
+    if rec.get("reason"):
+        lines.append(f"原因   : {rec['reason']}")
+    cmd = (rec.get("rerun_cmd") or "").splitlines()
+    if cmd:
+        lines.append(f"重跑   : {cmd[0]}")
+    if rec.get("log_url"):
+        lines.append(f"日志   : {rec['log_url']}")
+    if rec.get("log_tail"):
+        tail = "\n".join("    " + ln for ln in rec["log_tail"].splitlines()[-6:])
+        lines.append("日志尾部:\n" + tail)
+    return {"msg_type": "text", "content": {"text": "\n".join(lines)}}
+
+
+def _feishu_card(rec):
+    """交互式卡片：头部按事件着色，附「打开 Airflow 日志」按钮。"""
+    title = f"数仓告警 | {rec.get('level', rec.get('event', ''))} {rec.get('task_id', '')}"
+    md = [f"**任务**：{rec.get('dag_id', '-')} / {rec.get('task_id', '-')}",
+          f"**数据日**：{rec.get('ds') or '-'}　**重试**：{rec.get('try_number')}"]
+    if rec.get("exception"):
+        md.append(f"**异常**：{rec['exception']}")
+    if rec.get("reason"):
+        md.append(f"**原因**：{rec['reason']}")
+    cmd = (rec.get("rerun_cmd") or "").splitlines()
+    if cmd:
+        md.append(f"**重跑**：`{cmd[0][:180]}`")
+
+    elements = [{"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(md)}}]
+    if rec.get("log_tail"):
+        tail = "\n".join(rec["log_tail"].splitlines()[-8:])
+        elements += [{"tag": "hr"},
+                     {"tag": "div",
+                      "text": {"tag": "plain_text", "content": ("日志尾部：\n" + tail)[:1500]}}]
+    if rec.get("log_url"):
+        elements.append({"tag": "action", "actions": [
+            {"tag": "button", "type": "primary",
+             "text": {"tag": "plain_text", "content": "打开 Airflow 日志"},
+             "url": rec["log_url"]}]})
+
+    return {"msg_type": "interactive",
+            "card": {"config": {"wide_screen_mode": True},
+                     "header": {"title": {"tag": "plain_text", "content": title},
+                                "template": FEISHU_TEMPLATE.get(rec.get("event"), "orange")},
+                     "elements": elements}}
+
+
+def _feishu(rec):
+    """飞书通道，返回 (ok, detail)，不抛异常；未配置 webhook 时跳过。"""
+    url, secret, style = _feishu_conf()
+    if not url:
+        return False, "未配置 DW_ALERT_FEISHU_WEBHOOK（跳过）"
+
+    payloads = [_feishu_text(rec)] if style == "text" else [_feishu_card(rec), _feishu_text(rec)]
+    detail = "未发送"
+    for i, p in enumerate(payloads):
+        try:
+            if secret:
+                ts = str(int(time.time()))          # 秒级时间戳，不是毫秒
+                payload = {"timestamp": ts, "sign": gen_sign(ts, secret), **p}
+            else:
+                payload = p
+            ok, detail = _feishu_post(url, payload)
+        except Exception as e:                      # 网络异常同样降级，不往外抛
+            ok, detail = False, f"{type(e).__name__}: {e}"
+        if ok:
+            return True, f"{detail}（第 {i + 1} 次尝试：{p['msg_type']}）"
+    return False, detail
 
 
 def _email(rec):
@@ -216,16 +319,8 @@ def _email(rec):
     except Exception:
         pass
 
-
-# ---------------- 保留策略 ----------------
 def prune(verbose=True):
-    """按保留策略清理：台账只留最近 KEEP_DAYS 天，Windows 文件超限则截断。
-
-    安全边界：
-      · **只删**文件名严格匹配 `alerts-YYYY-MM-DD.jsonl` 的（`.gitkeep`、别的文件一概不动）；
-      · 按**文件名里的日期**判断过期，不看 mtime —— 规则确定、可审计；
-      · 全程 try/except，清理失败绝不影响写告警和任务状态。
-    """
+    """清理过期台账并截断超限的 Windows 文件；只处理 alerts-YYYY-MM-DD.jsonl，按文件名日期判断过期。"""
     removed = []
     cutoff = datetime.now().date() - timedelta(days=KEEP_DAYS)
 
@@ -265,7 +360,7 @@ def prune(verbose=True):
 
 
 def _prune_once_a_day():
-    """在 notify 里顺手触发：每个进程每天最多清一次（目录就几十个文件，开销可忽略）。"""
+    """由 notify 触发，每个进程每天最多清理一次。"""
     global _pruned_on
     today = datetime.now().date()
     if _pruned_on != today:
@@ -274,7 +369,7 @@ def _prune_once_a_day():
 
 
 def status():
-    """看台账现状（只读，不产生记录）。"""
+    """查看台账现状（只读）。"""
     files = sorted(ALERT_DIR.glob("alerts-*.jsonl")) if ALERT_DIR.exists() else []
     print(f"  台账目录 : {ALERT_DIR}")
     print(f"  存在     : {ALERT_DIR.exists()}")
@@ -290,8 +385,6 @@ def status():
     else:
         print(f"  Windows  : {WIN_ALERT_FILE}  （还没生成）")
 
-
-# ---------------- 对外入口 ----------------
 def notify(context, event="failure", extra=None):
     """DAG 回调入口。任何通道失败都不影响主流程。"""
     _prune_once_a_day()
@@ -306,7 +399,7 @@ def notify(context, event="failure", extra=None):
             pass
     if event not in PUSH_EVENTS:
         return
-    for ch in (_windows_toast, _webhook, _email):
+    for ch in (_windows_toast, _webhook, _feishu, _email):
         try:
             ch(rec)
         except Exception:
@@ -326,7 +419,7 @@ if __name__ == "__main__":
     ap.add_argument("--status", action="store_true", help="看台账现状（路径/文件数/体积/保留策略）")
     ap.add_argument("--prune", action="store_true", help="立即执行保留策略（清理过期台账）")
     ap.add_argument("--selftest", action="store_true",
-                    help="⚠️ 发一条假告警验证各通道 —— **会往台账里写一条测试记录**，事后需手动删")
+                    help="WARN: 发一条假告警验证各通道 —— **会往台账里写一条测试记录**，事后需手动删")
     args = ap.parse_args()
 
     if args.prune:
@@ -341,8 +434,9 @@ if __name__ == "__main__":
         notify({"dag": _D(), "task": _T(), "ds": "2019-11-01", "run_id": "manual__selftest",
                 "try_number": 1, "exception": RuntimeError("selftest 假异常"),
                 "reason": None}, "failure")
-        print(f"✅ 自测完成，测试记录写在 {ALERT_DIR}/alerts-*.jsonl（记得删）")
+        print(f"OK: 自测完成，测试记录写在 {ALERT_DIR}/alerts-*.jsonl（记得删）")
         print(f"   推送通道：webhook={'已配置' if os.environ.get('DW_ALERT_WEBHOOK') else '未配置（跳过）'}"
+              f"  飞书={'已配置' if os.environ.get('DW_ALERT_FEISHU_WEBHOOK') else '未配置（跳过）'}"
               f"  邮件={'已配置' if os.environ.get('DW_ALERT_SMTP_HOST') else '未配置（跳过）'}")
     else:
         status()

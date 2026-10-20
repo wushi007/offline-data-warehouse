@@ -9,9 +9,7 @@ from utils import get_spark, hdfs_partition_count
 
 spark = get_spark()
 spark.sparkContext.setLogLevel("ERROR")
-# 1. 切换数据库
 spark.sql("USE default")
-# 2. 查询表列表
 df = spark.sql("SHOW TABLES")
 df.show()
 

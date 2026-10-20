@@ -2,13 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 ads.ads_session_behavior_daily — 会话行为日报
-==============================================
-来源 dws_user_session_daily；粒度：每天 1 行。
-指标：会话数 / 平均会话时长 / 平均行为数 / 加购转化率。
-
-用法：
-  python etl/ads/ads_session_behavior_daily.py --dt 2019-10-01
-  python etl/ads/ads_session_behavior_daily.py --start 2019-10-01 --end 2019-10-31
+来源 dws_user_session_daily；粒度每天 1 行，指标为会话数、均时长、均行为数与加购转化率。
+用法：python etl/ads/ads_session_behavior_daily.py --dt 2019-10-01，或 --start/--end 指定区间。
 """
 
 import argparse
@@ -56,7 +51,7 @@ def main():
     print(f"📈 {TABLE} {len(days)} 天：{days[0]} ~ {days[-1]}")
     for d in days:
         build(spark, d)
-    print("✅ 完成")
+    print("OK: 完成")
     spark.stop()
 
 

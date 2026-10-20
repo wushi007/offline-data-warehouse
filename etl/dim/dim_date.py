@@ -1,13 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-dim.dim_date — 日期维度（覆盖 2019 全年）
-=========================================
-静态表：一次性生成，不参与日调度（增量任务里不跑）。
-is_workday 按周一~周五（无节假日日历，口径已在列注释说明）。
+dim.dim_date — 日期维度（2019 全年静态表）
 
-用法：
-  python etl/dim/dim_date.py
+一次性生成，不参与日调度；is_workday 按周一至周五，无节假日日历。
+
+用法：python etl/dim/dim_date.py
 """
 
 import argparse
@@ -46,7 +44,7 @@ def main():
     spark.sparkContext.setLogLevel("ERROR")
     print(f"🏗  {TABLE} 生成")
     rebuild(spark)
-    print("✅ 完成")
+    print("OK: 完成")
     spark.stop()
 
 

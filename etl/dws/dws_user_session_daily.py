@@ -2,14 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 dws.dws_user_session_daily — 日 × 用户 × 会话 行为汇总
-======================================================
-粒度：event_date + user_id + user_session
-口径：不 JOIN 维度，直接对事实表 GROUP BY；会话时长 = GREATEST(MAX-MIN, 0) 秒。
-幂等：静态分区 INSERT OVERWRITE，重跑只覆盖当天分区。
-
-用法：
-  python etl/dws/dws_user_session_daily.py --dt 2019-10-01
-  python etl/dws/dws_user_session_daily.py --start 2019-10-01 --end 2019-10-31
+粒度 event_date + user_id + user_session；直接对事实表 GROUP BY，不 JOIN 维度。
+会话时长 = GREATEST(MAX-MIN, 0) 秒；静态分区覆盖写，重跑幂等。
+用法：python etl/dws/dws_user_session_daily.py --dt 2019-10-01，或 --start/--end 指定区间。
 """
 
 import argparse
@@ -62,7 +57,7 @@ def main():
     print(f"📊 {TABLE} 汇总 {len(days)} 天：{days[0]} ~ {days[-1]}")
     for d in days:
         build(spark, d)
-    print("✅ 完成")
+    print("OK: 完成")
     spark.stop()
 
 

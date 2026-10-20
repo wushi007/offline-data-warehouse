@@ -2,15 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 ads.ads_user_retention_daily — 用户留存日报
-===========================================
-来源 dws_user_behavior_daily；粒度：每个基准日 D0 一行（分区 = 基准日）。
-
-口径：基准日 D0 的活跃用户里，D+1 / D+3 / D+7 仍活跃的比例。
-     超出数据区间的窗口输出 **NULL 而不是 0**：月末 7 天没有 D+7 数据，
-     0 会被读成"留存归零"，NULL 才如实表达"右删失、未观测"。
-
-用法：
-  python etl/ads/ads_user_retention_daily.py --start 2019-10-01 --end 2019-10-31
+来源 dws_user_behavior_daily；粒度每个基准日 D0 一行（分区 = 基准日）。
+口径：D0 活跃用户在 D+1/D+3/D+7 仍活跃的比例，超出数据区间输出 NULL 而非 0。
+用法：python etl/ads/ads_user_retention_daily.py --start 2019-10-01 --end 2019-10-31
 """
 
 import argparse
@@ -30,22 +24,19 @@ RETENTION_OFFSETS = [1, 3, 7]
 
 
 def _plus(dt, n):
-    """日期 +n 天 → 'YYYY-MM-DD'。"""
+    """日期 +n 天，返回 'YYYY-MM-DD'。"""
     from datetime import date as _d, timedelta
     return (_d.fromisoformat(dt) + timedelta(days=n)).isoformat()
 
 
 def retention_sql(dt, end):
-    """基准日 D0 的活跃用户里，D+1 / D+3 / D+7 仍活跃的比例。"""
+    """生成基准日 dt 的留存 SQL；end 为数据区间末日，用于判断右删失窗口。"""
     valid = [n for n in RETENTION_OFFSETS if _plus(dt, n) <= end]
     ctes = "".join(
         f",\n    d{n} AS (SELECT user_id FROM {DWS_USER} WHERE {P} = '{_plus(dt, n)}')"
         for n in valid
     )
-    # 顺序必须与建表 DDL 一致：d0_uv, (dN_uv, dN_rate) * N。
-    # 之前这里按 uv 全排完再排 rate，又没写列名列表 → INSERT 按位置硬塞，值整体串位
-    # （d1_rate 里装成了 d3_uv 的计数，double cast 后打印成 "30393.0%" 这种鬼数）。
-    # 现在既按 DDL 顺序输出，又显式给出列名列表，双保险。
+    # 列顺序须与建表 DDL 一致，并显式给出列名列表：仅按位置 INSERT 会串位。
     uv_cols = ",\n".join(
         f"        (SELECT COUNT(*) FROM base b JOIN d{n} USING (user_id)) AS d{n}_uv"
         if n in valid else f"        CAST(NULL AS BIGINT) AS d{n}_uv"
@@ -77,7 +68,7 @@ def retention_sql(dt, end):
 
 
 def build(spark, dt, end):
-    """算单天基准日的留存（end = 数据区间末日，用于判断哪些窗口右删失）。"""
+    """计算单天基准日的留存；end 用于判断右删失窗口。"""
     spark.sql(retention_sql(dt, end))
     r = spark.sql(f"SELECT * FROM {TABLE} WHERE {P} = '{dt}'").collect()[0]
     return r
@@ -108,7 +99,7 @@ def main():
     spark.sparkContext.setLogLevel("ERROR")
     print(f"📈 {TABLE} {args.start} ~ {args.end}")
     build_range(spark, args.start, args.end)
-    print("✅ 完成")
+    print("OK: 完成")
     spark.stop()
 
 

@@ -2,21 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 pipeline.py — 全链路编排（一个进程、一个 SparkSession 跑完一段区间）
-====================================================================
-把各层的表脚本按依赖顺序串起来，**复用同一个 SparkSession**（省掉每天十几次会话启动开销）。
-每张表也都能单独跑（`python etl/<层>/<表>.py`），单表跑失败时便于重试与定位。
 
-依赖顺序：
-    ODS(已有分区) → DWD 事实/脏数据 → DWD DQC → DWS 四张 → DIM 四张 → ADS 五张日报
-    ADS 的 retention / rfm 是**区间型**（RFM 是快照），单独跑：
-        python etl/ads/ads_user_retention_daily.py --start D --end D
-        python etl/ads/ads_user_rfm_snapshot.py --start D --end D
-
-用法：
+按依赖顺序串联各层表脚本，单表也可单独运行。用法：
   python etl/pipeline.py --start 2019-10-01 --end 2019-10-31
-  python etl/pipeline.py --dt 2019-11-01              # 单日增量（含 DIM 增量）
-  python etl/pipeline.py --dt 2019-11-01 --only dwd,dws
-  python etl/pipeline.py --start 2019-10-01 --end 2019-10-31 --check-only
+  python etl/pipeline.py --dt 2019-11-01 [--only dwd,dws] [--check-only]
 """
 
 import argparse
@@ -40,7 +29,7 @@ from etl.dws import (  # noqa: E402
 )
 from etl.utils import date_range, get_spark  # noqa: E402
 
-# (步骤名, 层级, 是否需要 dt) —— 顺序即依赖顺序
+# (步骤名, 层级, 构建函数)，顺序即依赖顺序
 STEPS = [
     ("dwd_event_fact",       "dwd", dwd_event_fact.build),
     ("dwd_event_dirty",      "dwd", dwd_event_dirty.build),
@@ -90,24 +79,24 @@ def run_checks(spark, start, end):
          round(dwd["gmv"], 2), [round(dws["gmv"], 2), round(prod["gmv"], 2), round(ads["gmv"], 2)]),
     ]:
         ok = all(o == base for o in others)
-        print(f"  {'✅' if ok else '❌'} {name}: {base:,} vs {[f'{o:,}' for o in others]}")
+        print(f"  {'OK' if ok else 'FAIL'} {name}: {base:,} vs {[f'{o:,}' for o in others]}")
 
     bad = q(f"""SELECT COUNT(*) c FROM {DBS['ads']}.ads_conversion_funnel_daily
                 WHERE {P} BETWEEN '{start}' AND '{end}'
                   AND NOT (view_uv >= cart_uv AND view_uv >= purchase_uv)""")["c"]
-    print(f"  {'✅' if bad == 0 else '❌'} 漏斗不变量（每日 view_uv 为上游最大值）: {bad} 天违规")
+    print(f"  {'OK' if bad == 0 else 'FAIL'} 漏斗不变量（每日 view_uv 为上游最大值）: {bad} 天违规")
 
     bad2 = q(f"""SELECT COUNT(*) c FROM (
                     SELECT product_id FROM {DBS['dim']}.dim_product_scd2
                     GROUP BY product_id HAVING SUM(dw_is_current) <> 1) t""")["c"]
-    print(f"  {'✅' if bad2 == 0 else '❌'} SCD2 每商品单一当前版本: {bad2} 个违规")
+    print(f"  {'OK' if bad2 == 0 else 'FAIL'} SCD2 每商品单一当前版本: {bad2} 个违规")
 
     hour = q(f"""SELECT SUM(pv) pv, SUM(purchase_cnt) buy FROM {DBS['dws']}.dws_traffic_hour_daily
                  WHERE {P} BETWEEN '{start}' AND '{end}'""")
     hour_ads = q(f"""SELECT SUM(pv) pv FROM {DBS['ads']}.ads_traffic_hour_daily
                      WHERE {P} BETWEEN '{start}' AND '{end}'""")
     ok_hour = hour["pv"] == dwd["rows_cnt"] and hour_ads["pv"] == dwd["rows_cnt"]
-    print(f"  {'✅' if ok_hour else '❌'} 分时守恒 DWS=ADS=DWD明细: "
+    print(f"  {'OK' if ok_hour else 'FAIL'} 分时守恒 DWS=ADS=DWD明细: "
           f"PV {hour['pv']:,}={hour_ads['pv']:,}={dwd['rows_cnt']:,} / 购买 {hour['buy']:,}")
 
     ret = q(f"""SELECT COUNT(*) c,
@@ -119,7 +108,7 @@ def run_checks(spark, start, end):
                       AND ((d1_uv IS NOT NULL AND d1_uv > d0_uv)
                         OR (d3_uv IS NOT NULL AND d3_uv > d0_uv)
                         OR (d7_uv IS NOT NULL AND d7_uv > d0_uv))""")["c"]
-    print(f"  {'✅' if bad_ret == 0 else '❌'} 留存不变量（D+n 人数 ≤ D0）: {bad_ret} 天违规；"
+    print(f"  {'OK' if bad_ret == 0 else 'FAIL'} 留存不变量（D+n 人数 ≤ D0）: {bad_ret} 天违规；"
           f"其中 {ret['censored']} 天右删失（NULL）")
 
 

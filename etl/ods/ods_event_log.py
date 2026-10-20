@@ -1,16 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-ods_import.py — ODS 层接入
-==========================
-从源 CSV 按日期切分，零修改落盘到 ODS（Parquet + event_date 分区）。
+ods_event_log.py — ODS 按天接入
 
-原则：ODS 零修改，保留原始字段，仅提取 event_date 作为分区键；
-     所有业务清洗统一收敛至 DWD 层。
+从源 CSV 按日期切分，零修改落盘到 ODS（Parquet + event_date 分区），
+业务清洗在 DWD 层完成；分区已存在且非空时跳过。批量导入见 ods_event_log_bulk.py。
 
-用法：
-  python scripts/ods_import.py --dt 2019-11-01
-幂等：目标分区已存在且非空时跳过（不重复扫描 9GB CSV）。
+用法：python etl/ods/ods_event_log.py --dt 2019-11-01
 """
 
 import argparse
@@ -19,14 +15,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from config.config import HDFS_ROOT, SRC_CSV_2019NOV, SRC_SCHEMA, ODS_PATH  # noqa: E402
+from config.config import DBS, SRC_CSV_2019NOV, SRC_SCHEMA, ODS_PATH  # noqa: E402
 from etl.utils import get_spark, hdfs_partition_count  # noqa: E402
+
+# MSCK REPAIR 目标表，必须为库名.表名；DataFrame 直写不会登记 metastore 分区。
+TABLE = f"{DBS['ods']}.ods_event_log"
 
 
 def import_day(spark, dt: str):
     from pyspark.sql import functions as F
 
-    # 幂等：分区已存在且非空 → 跳过
     target = f"{ODS_PATH}/event_date={dt}"
     if hdfs_partition_count(spark, target, row=False) > 0:
         print(f"  {dt} 分区已存在，跳过导入")
@@ -49,12 +47,13 @@ def import_day(spark, dt: str):
        .option("compression", "snappy") \
        .parquet(ODS_PATH)
 
-    # ★ 补注册分区：DataFrame 直写路径不会更新 Hive metastore，需 MSCK REPAIR
-    #   （否则物理目录有了、metastore 里看不到；按路径读的作业不受影响）
+    # 补注册分区；失败仅告警，按路径读不受影响
     try:
         spark.sql(f"MSCK REPAIR TABLE {TABLE}")
+        n_parts = spark.sql(f"SHOW PARTITIONS {TABLE}").count()
+        print(f"  OK: 分区已注册（metastore 现有 {n_parts} 个分区）")
     except Exception as e:
-        print(f"  ⚠️ MSCK REPAIR 失败（不致命）：{str(e)[:80]}")
+        print(f"  WARN: MSCK REPAIR 失败（不致命，按路径读不受影响）：{str(e)[:100]}")
 
     print(f"  ODS 导入完成：{ODS_PATH}/event_date={dt} ({n:,} 行)")
     return n

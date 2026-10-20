@@ -1,7 +1,7 @@
 # 从零跑通：配置到运行
 
-> 目标：拿到这份代码后，从环境准备到跑出数据，一步步走完。
-> 本文假设你在一台 Linux / WSL2 机器上操作。
+> 本文描述从环境准备到产出数据的完整流程。
+> 操作环境为 Linux 或 WSL2。
 
 ---
 
@@ -23,40 +23,34 @@
 
 ## 一、环境要求
 
-**本项目验证过的机器**：一台 **16 GB 内存 / 1 TB 硬盘**的 Windows 笔记本，
-运行环境 **WSL2 + Ubuntu 22.04**，单机跑完 4,700 万行行为日志。
+验证环境为一台 16 GB 内存、1 TB 硬盘的 Windows 笔记本，WSL2 + Ubuntu 22.04，单机完成 4,700 万行行为日志的处理。
 
 | 组件 | 本项目验证过的版本 | 说明 |
 |---|---|---|
-| 操作系统 | **Ubuntu 22.04.5 on WSL2** | 其他 Linux 发行版同理 |
-| **内存** | **16 GB（宿主）** | WSL2 实际可见约 **7.6 GB**，见下方「内存说明」 |
-| **硬盘** | **1 TB** | 源 CSV 约 9 GB；数仓中间结果约 15 GB |
-| **JDK** | **17** | Spark 3.5 要求 JDK 8/11/17，本项目用 17 |
+| 操作系统 | Ubuntu 22.04.5 on WSL2 | 其他 Linux 发行版同理 |
+| 内存 | 16 GB（宿主） | WSL2 实际可见约 7.6 GB，见下方「内存说明」 |
+| 硬盘 | 1 TB | 源 CSV 约 9 GB；数仓中间结果约 15 GB |
+| JDK | 17 | Spark 3.5 要求 JDK 8/11/17，本项目用 17 |
 | Python | 3.10.12 | 3.9+ 均可 |
-| **Spark** | **3.5.9**（hadoop3 版） | PySpark 3.5.8 |
-| **Hadoop / HDFS** | **3.4.3** | 只需 HDFS，MR 用不到 |
+| Spark | 3.5.9（hadoop3 版） | PySpark 3.5.8 |
+| Hadoop / HDFS | 3.4.3 | 只需 HDFS，MR 用不到 |
 | Hive Metastore | Spark 内嵌 | 通过 `spark.sql.catalogImplementation` 挂载 |
 | MySQL | 8.x（端口 3307） | 仅 ADS 落地用到，可选 |
 | Airflow | 3.3.0 | 仅调度用到，可选 |
 
-**最低可行配置**：JDK 17 + Spark + HDFS + Python 环境。MySQL / Airflow / StarRocks 都不是跑通链路的前提。
+最低可行配置：JDK 17 + Spark + HDFS + Python 环境。MySQL / Airflow / StarRocks 均不是跑通链路的前提。
 
 ### 内存说明（WSL2 用户尤其注意）
 
-宿主 16 GB，但 **WSL2 默认只向虚拟机分配约一半物理内存**（未调优 `/etc/wsl.conf` 时，
-实测可见 **7.6 GB**）。再扣掉常驻的 HDFS + MySQL + Airflow（约 2.5 GB），
-**留给 Spark 的余量只有 4~5 GB**。
-
-由此决定了三条硬性设计：
+宿主内存 16 GB，WSL2 默认向虚拟机分配约一半物理内存（未调优 `/etc/wsl.conf` 时实测可见 7.6 GB）。扣除常驻的 HDFS、MySQL、Airflow（约 2.5 GB），Spark 可用余量为 4~5 GB。由此确定三项约束：
 
 | 约束 | 取值 | 原因 |
 |---|---|---|
-| driver 内存 | `3g` | 按机器**可用**内存给，不是按「任务看起来大」给。给到 `6g` 时 JVM 会被内核 OOM killer 杀掉（`dmesg` 可见 `Out of memory: Killed process (java)`） |
+| driver 内存 | `3g` | 按机器可用内存设置。设为 `6g` 时 JVM 会被内核 OOM killer 终止（`dmesg` 可见 `Out of memory: Killed process (java)`） |
 | 同一时刻一个 SparkSession | `etl/run_locked.sh` 的 `flock` 闸门 | 两个会话并存会 OOM |
-| 调度并发 = 1 | `max_active_tasks=1` + `max_active_runs=1` | 与闸门构成双保险 |
+| 调度并发 = 1 | `max_active_tasks=1` + `max_active_runs=1` | 与闸门共同保证串行 |
 
-> 像 `/home/warehouse/hadoop-data/warehouse` 这样的路径都写在 `config/config.py` 里，
-> 换机器时改那一处即可；**内存相关的取值也可以按新机器的可用内存放宽**。
+> 路径（如 `/home/warehouse/hadoop-data/warehouse`）集中在 `config/config.py`，换机器时修改该文件即可。内存相关取值可按新机器的可用内存调整。
 
 ---
 
@@ -80,7 +74,7 @@ pymysql             # StarRocks / MySQL 连接
 networkx
 ```
 
-> Airflow 依赖**不在**这里 —— 它装在独立的 `airflow-venv`，避免和 Spark 的依赖打架。
+> Airflow 依赖不在此文件中，它安装在独立的 `airflow-venv`，以避免与 Spark 依赖冲突。
 
 ### 2. 确认 Java
 
@@ -96,17 +90,17 @@ export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 export PATH="$JAVA_HOME/bin:$PATH"
 ```
 
-`run.sh` 已经内置了这两行，所以用 `run.sh` 跑任务时不用管。
+`run.sh` 已内置这两行，使用 `run.sh` 运行任务时无需另行设置。
 
 ---
 
 ## 三、启动大数据环境
 
-本项目需要 **HDFS**（存数据）+ **Hive Metastore**（Spark 用来注册表）。
+运行需要 HDFS（存储数据）和 Hive Metastore（Spark 用于注册表）。
 
-### 如果你有启停脚本
+### 如果有启停脚本
 
-仓库自带一套参考脚本的调用方式（脚本本身在开发环境目录，未纳入本仓库）：
+仓库提供启停脚本的调用方式（脚本本身位于开发环境目录，未纳入本仓库）：
 
 ```bash
 ./start-env.sh            # 启动 MySQL → HDFS → Spark
@@ -114,7 +108,7 @@ export PATH="$JAVA_HOME/bin:$PATH"
 ./stop-env.sh             # 停止
 ```
 
-### 如果是全新环境，手动起 HDFS
+### 如果是全新环境，手动启动 HDFS
 
 ```bash
 # 1. 格式化 NameNode（仅首次）
@@ -128,7 +122,7 @@ jps                       # 应看到 NameNode / DataNode / SecondaryNameNode
 curl -s localhost:9870 | head -3
 ```
 
-**验证清单**（跑数据前务必确认）：
+验证（运行前确认）：
 
 ```bash
 ss -ltn | grep -E ':(8020|9870|3307)'    # 8020 NameNode / 9870 WebUI / 3307 MySQL
@@ -158,13 +152,13 @@ brand, price, user_id, user_session
 
 `event_type` 有 4 个枚举值：`view` / `cart` / `remove_from_cart` / `purchase`。
 
-> ⚠️ **时间戳是 UTC**。这一点直接影响分区正确性，见下文「时区」一节。
+> 源时间戳为 UTC，影响分区正确性，参见「常见问题」Q3。
 
 ---
 
 ## 五、修改配置
 
-**所有配置集中在一个文件**：`config/config.py`。你需要改的通常只有前几行：
+配置集中在 `config/config.py`，通常只需修改前几行：
 
 ```python
 # ---------------- HDFS 路径 ----------------
@@ -190,7 +184,7 @@ DQC_ROWS_WARN         = 0.50        # 行数波动 50% 告警
 DQC_ROWS_BLOCK        = 0.80        # 行数波动 80% 阻断
 ```
 
-### 数据库凭据（从环境变量读，不要写死）
+### 数据库凭据（从环境变量读取）
 
 ```python
 MYSQL = {
@@ -208,11 +202,11 @@ cp .env.example .env
 vim .env
 ```
 
-`.env` 已被 `.gitignore` 忽略，**不会入库**。
+`.env` 已被 `.gitignore` 忽略，不会提交到仓库。
 
 ### 环境解析
 
-`run.sh` 启动时会自己把四类路径解析好，通常**什么都不用配**：
+`run.sh` 启动时会自动解析四类路径，通常无需配置：
 
 | 变量 | 探测顺序 |
 |---|---|
@@ -222,20 +216,13 @@ vim .env
 | `HADOOP_CONF_DIR` | 环境变量 → `$HADOOP_HOME/etc/hadoop` |
 | Python 解释器 | `PYTHON` 环境变量 → `./.venv` → `../.venv` → `~/.venv` → `python3` |
 
-（只取目录、按版本号排序取最新，所以 `spark-*.tgz` 安装包不会被误选。）
+（只匹配目录，并按版本号取最新，`spark-*.tgz` 安装包不会被选中。）
 
-**为什么 `SPARK_HOME` 必须解析出来**：pyspark 找不到它时会回退到 venv 里的
-pyspark 包目录，那里**没有 `conf/spark-defaults.conf`** —— 而
-`spark.sql.catalogImplementation=hive` 与 metastore 的 JDBC 连接都写在那，
-后果是建表直接报 `NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT`。
-探测全失败时 `run.sh` 会打印一条带原因和解决方式的告警，不会让你去猜 Spark 的报错。
+`SPARK_HOME` 必须解析成功：pyspark 找不到它时会回退到 venv 中的 pyspark 包目录，该目录没有 `conf/spark-defaults.conf`，而 `spark.sql.catalogImplementation=hive` 与 metastore 的 JDBC 连接都配置在该文件中，结果是建表时报 `NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT`。探测全部失败时，`run.sh` 会输出包含原因和处理方式的提示。
 
-> 交互式终端里 `.bashrc` 已经导出了这些变量，所以手敲看不出差别；
-> 但脚本 / cron / CI 等**非交互场景不会加载 `.bashrc`**（开头那句
-> "If not running interactively, don't do anything" 会直接 return），
-> 这时就靠 `run.sh` 自己探测兜底。
+> 交互式终端中 `.bashrc` 已导出这些变量；脚本、cron、CI 等非交互场景不加载 `.bashrc`（开头的 "If not running interactively, don't do anything" 会直接 return），此时由 `run.sh` 自行探测。
 
-装在非常规位置时显式指定即可：
+安装在非常规位置时显式指定：
 
 ```bash
 SPARK_HOME=/your/spark PYTHON=/path/to/python ./run.sh build --dt 2019-11-01
@@ -249,16 +236,14 @@ SPARK_HOME=/your/spark PYTHON=/path/to/python ./run.sh build --dt 2019-11-01
 ./run.sh ddl
 ```
 
-做了什么：
+执行内容：
 
-- 建 **5 个库**（`ods` / `dwd` / `dim` / `dws` / `ads`）
-- 建 **19 张表**，全部是 **Hive 外部表 + LOCATION 指向 HDFS**
-  （外部表的好处：`DROP TABLE` 不删文件，便于重建）
-- 存储格式 **PARQUET + SNAPPY**
+- 创建 5 个库（`ods` / `dwd` / `dim` / `dws` / `ads`）
+- 创建 19 张表，均为 Hive 外部表 + LOCATION 指向 HDFS
+- 存储格式 PARQUET + SNAPPY
 - 对 ODS 执行 `MSCK REPAIR TABLE` 注册已有分区
 
-**为什么用外部表**：数仓重建时只需 `DROP` + `CREATE`，HDFS 上的数据文件仍在，
-不用担心误删。代价是重建前必须手动清目录（见「常见问题」）。
+使用外部表时，重建只需 `DROP` + `CREATE`，HDFS 数据文件保留；代价是重建前必须手动清理目录（见「常见问题」）。
 
 只重建某张表：
 
@@ -276,8 +261,7 @@ SPARK_HOME=/your/spark PYTHON=/path/to/python ./run.sh build --dt 2019-11-01
 ./run.sh build --start 2019-10-01 --end 2019-10-31
 ```
 
-**一个进程、一个 SparkSession** 跑完 DWD → DWS → DIM → ADS，最后自动跨层对账。
-（复用会话是为了省掉每天十几次的 SparkSession 启动开销）
+单个进程、单个 SparkSession 完成 DWD → DWS → DIM → ADS，最后自动跨层对账。复用会话可减少每日多次启动 SparkSession 的开销。
 
 ### 方式二：单日增量
 
@@ -306,7 +290,7 @@ SPARK_HOME=/your/spark PYTHON=/path/to/python ./run.sh build --dt 2019-11-01
 ./run.sh table etl/ads/ads_trade_daily.py --dt 2019-11-01
 ```
 
-### ODS 接入（源数据进数仓的第一步）
+### ODS 接入（源数据进入数仓的第一步）
 
 ```bash
 ./run.sh ods-import --dt 2019-11-01   # 单日导入（幂等：分区已存在则跳过）
@@ -315,20 +299,19 @@ SPARK_HOME=/your/spark PYTHON=/path/to/python ./run.sh build --dt 2019-11-01
 ./run.sh backfill --start D --end D    # 批量回补（逐日）
 ```
 
-> **`ods-bulk` 更快**：整份 CSV 只扫一遍，按日期切分区。逐日导入会重复扫 31 次。
+> `ods-bulk` 更快：整份 CSV 只扫描一次，按日期切分分区；逐日导入会重复扫描 31 次。
 
 ### 串行闸门（重要）
 
-所有 Spark 调用都要经过 `etl/run_locked.sh`：
+所有 Spark 调用都经过 `etl/run_locked.sh`：
 
 ```bash
 exec flock -w "$WAIT" "$LOCK" "$@"
 ```
 
-**同一时刻只允许一个 SparkSession**。原因：7.6G 内存的机器上并发跑两个 Spark 作业会 OOM。
-抢不到锁的进程会排队等待（默认最多等 7200 秒）。
+同一时刻只允许一个 SparkSession：7.6G 内存的机器上并发运行两个 Spark 作业会 OOM。未获得锁的进程排队等待，默认最长 7200 秒。
 
-所以：**不要绕过 `run.sh` 直接 `python xxx.py`**，否则闸门失效。
+不要绕过 `run.sh` 直接执行 `python xxx.py`，否则闸门失效。
 
 ---
 
@@ -340,16 +323,16 @@ exec flock -w "$WAIT" "$LOCK" "$@"
 ./run.sh check --start 2019-10-01 --end 2019-10-31
 ```
 
-输出（本项目实测）：
+输出（实测）：
 
 ```
 DWD 明细 42,413,557 行 / 购买 742,773 / GMV 229,933,212.63
-✅ 购买次数守恒 DWD=DWS用户=DWS商品=DWS会话=ADS: 742,773
-✅ GMV 守恒     DWD=DWS用户=DWS商品=ADS: 229,933,212.63
-✅ 漏斗不变量（每日 view_uv 为上游最大值）: 0 天违规
-✅ SCD2 每商品单一当前版本: 0 个违规
-✅ 分时守恒 DWS=ADS=DWD明细: PV 42,413,557 / 购买 742,773
-✅ 留存不变量（D+n 人数 ≤ D0）: 0 天违规；其中 7 天 D+7 右删失（NULL）
+OK 购买次数守恒 DWD=DWS用户=DWS商品=DWS会话=ADS: 742,773
+OK GMV 守恒     DWD=DWS用户=DWS商品=ADS: 229,933,212.63
+OK 漏斗不变量（每日 view_uv 为上游最大值）: 0 天违规
+OK SCD2 每商品单一当前版本: 0 个违规
+OK 分时守恒 DWS=ADS=DWD明细: PV 42,413,557 / 购买 742,773
+OK 留存不变量（D+n 人数 ≤ D0）: 0 天违规；其中 7 天 D+7 右删失（NULL）
 ```
 
 ### 直接查数据
@@ -395,49 +378,89 @@ airflow-venv/bin/airflow standalone        # 启动（含 Web UI）
 
 ### 2. 挂 DAG
 
-DAG 文件在 `scheduler/`。Airflow 只读 `$AIRFLOW_HOME/dags/`，所以要做软链接：
+DAG 文件在 `scheduler/`。Airflow 只读 `$AIRFLOW_HOME/dags/`，因此需要创建软链接：
 
 ```bash
 ln -s /path/to/ecom-warehouse/scheduler/incremental_warehouse_dag.py \
       $AIRFLOW_HOME/dags/incremental_warehouse_dag.py
 ```
 
-用软链接而不是复制，好处是**改仓库里的 DAG 就是改 Airflow 的 DAG**，一份代码两处用。
+使用软链接而非复制，仓库中的 DAG 修改会直接反映到 Airflow。
 
-### 3. 路径配置（通常不用管）
+### 3. 配置（只需修改一个脚本）
 
-DAG 需要知道 venv、JDK、Spark、Hadoop 在哪。它**会自动探测**，顺序是：
+配置集中在 `scheduler/airflow_env.sh`，该脚本生成两项内容：
+
+| 产物 | 谁读它 | 内容 |
+|---|---|---|
+| Airflow Variable `warehouse_env`（JSON） | DAG | `project_root` / `venv_python` / `java_home` / `spark_home` / `hadoop_home` / `hadoop_conf_dir` / `data_start` / `data_end`（可选覆盖：`timeout_overrides_min` / `quality_tasks` / `quality_warn_tasks` / `default_timeout_min` / `owner`） |
+| `$AIRFLOW_HOME/airflow-env.sh` | Airflow 三进程 | `AIRFLOW__*` 环境变量（元数据库、端口、并发、摘代理） |
+
+```bash
+bash scheduler/airflow_env.sh --show     # 先看当前解析成什么（只读，不写任何东西）
+bash scheduler/airflow_env.sh            # 生成 Variable + env 文件
+```
+
+每一项都可以用同名环境变量覆盖，例如 `SPARK_HOME=/opt/spark bash scheduler/airflow_env.sh`。
+
+> `airflow variables import` 的格式要求
+>
+> `airflow variables import <file>` 会把 JSON 顶层的每个 key 当作独立的 Variable 名，因此配置文件必须包一层，写成：
+>
+> ```json
+> { "warehouse_env": { "spark_home": "/home/warehouse/apps/spark-3.5.9-bin-hadoop3", "data_start": "2019-10-01" } }
+> ```
+>
+> 不能直接铺平：
+>
+> ```json
+> { "spark_home": "...", "data_start": "..." }   ← 错误
+> ```
+>
+> 铺平后，库中会出现 `spark_home`、`data_start` 等扁平 key，而 DAG 读取的是单个 Variable `warehouse_env`，读不到时静默回退到代码默认值，不报错。症状：`airflow variables get warehouse_env` 报 `does not exist`，但 `variables list` 中有大量相似 key。
+>
+> `airflow_env.sh` 已按此格式生成，并在导入后回读校验；校验失败会打印 `WARN: ... 导入或回读校验失败`。
+
+> 使用环境变量 / Variable 而非直接修改 `airflow.cfg`（官方推荐做法）：
+> `airflow.cfg` 是生成文件，`airflow config` 升级或迁移时会被重写，手工修改会丢失；环境变量（`AIRFLOW__<SECTION>__<KEY>`）优先级最高，可版本化，也可按进程隔离。本机实测 `airflow.cfg` 与官方默认输出逐字节相同，即配置未写入 cfg，全部依赖 `airflow-env.sh` 的 8 个环境变量生效。
+
+DAG 内部的配置优先级（高 → 低），任一层可覆盖下一层：
+
+| 层 | 用途 |
+|---|---|
+| ① `os.environ` | 临时调试：`export SPARK_HOME=...` |
+| ② Airflow Variable `warehouse_env` | 正式配置：WebUI 修改后生效（DAG 重解析后带入） |
+| ③ 代码默认值 | clone 到任何目录、Spark/Hadoop 安装在常规位置时无需配置 |
+
+③ 的探测顺序：
 
 | 变量 | 探测顺序 |
 |---|---|
-| `DW_PROJECT_ROOT` | 环境变量 → 从 DAG 文件位置推导（`<repo>/scheduler/` 的上两级） |
-| `DW_VENV_PYTHON` | 环境变量 → `<repo>/.venv` → `<repo>/../.venv` → `~/.venv` |
-| `JAVA_HOME` | 环境变量 → `/usr/lib/jvm/java-17-openjdk-*` |
-| `SPARK_HOME` | 环境变量 → `~/apps/spark-*` → `/opt/spark*` → `/usr/local/spark*` |
-| `HADOOP_HOME` | 环境变量 → `~/apps/hadoop-[0-9]*` → `/opt/hadoop*` → `/usr/local/hadoop*` |
+| `project_root` | Variable/env → 从 DAG 文件位置推导（`<repo>/scheduler/` 的上两级） |
+| `venv_python` | Variable/env → `<repo>/.venv/bin/python` |
+| `java_home` | Variable/env → `/usr/lib/jvm/java-17-openjdk-*` → `/usr/lib/jvm/java-17-*` |
+| `spark_home` | Variable/env → `~/apps/spark-*` → `/opt/spark*` → `/usr/local/spark*` |
+| `hadoop_home` | Variable/env → `~/apps/hadoop-[0-9]*` → `/opt/hadoop*` → `/usr/local/hadoop*` |
 
-**所以只要 venv 建在仓库内（或建个软链接），Spark/Hadoop 装在常规位置，就什么都不用配。**
-
-装在不常规的位置时，在**启动 Airflow 的环境里**导出：
-
-```bash
-export SPARK_HOME=/your/path/to/spark
-export HADOOP_HOME=/your/path/to/hadoop
-export DW_VENV_PYTHON=/your/path/to/venv/bin/python
-```
-
-> 💡 如果 venv 在仓库外，最省事的做法是在仓库根建软链接，而不是设环境变量：
+> venv 位于仓库外时，推荐在仓库根目录创建软链接，而不是设置变量：
 > ```bash
 > ln -s /path/to/your/venv .venv
 > ```
 > `.gitignore` 已包含 `.venv`（含不带斜杠的写法，覆盖软链接的情况），不会被提交。
 
-路径有问题时，DAG 的第一个任务 `check_env` 会**提前失败并打印具体缺哪个路径**，
-不会让你在 Spark 抛出的难懂异常里找原因。
+### 4. 环境守卫脚本
 
-### 4. DAG 结构
+`check_env` 任务执行的 shell 单独放在 `scheduler/check_env.sh`。DAG 加载时会把配置值替换进 `__VENV__` / `__JAVA__` / `__SPARK__` / `__HADOOP__` / `__CONF__` / `__DAGS__` / `__AIRFLOW_HOME__` / `__OWNER_ROOT__` 占位符后执行。
 
-一表一个 task，依赖链如下：
+该脚本可单独用 `bash -n` 校验，也可单独运行调试，无需处理 Python 字符串转义。
+
+检查四项，任一不通过即提前失败，并打印需要修改的配置项：
+① 解释器存在且包含 pyspark；② JDK / Spark / Hadoop 目录；③ Hadoop 配置目录；④ HDFS NameNode 监听 8020。
+启动时会打印解析到的全部路径。
+
+### 5. DAG 结构
+
+一表一个 task（共 21 个 task / 21 条依赖边），依赖链如下：
 
 ```
 check_env
@@ -452,20 +475,20 @@ check_env
               dws_traffic_hour  → ads_traffic_hour
 ```
 
-**质量闸门失败即阻断下游** —— `dwd_event_fact_dqc` 不过，DWS/ADS 全部不跑。
+质量闸门失败会阻断下游：`dwd_event_fact_dqc` 不通过时，DWS 和 ADS 均不运行。
 
-### 5. 触发回补
+### 6. 触发回补
 
 ```bash
 airflow backfill create --dag-id incremental_warehouse_dag \
     --from-date 2019-11-01 --to-date 2019-11-30 --max-active-runs 1
 ```
 
-> `max-active-runs 1` 配合 flock 闸门，双保险保证串行。
+> `max-active-runs 1` 与 flock 闸门共同保证串行。
 
-### 6. 告警
+### 7. 告警
 
-`scheduler/alerts.py` 挂了 4+1 个通道，由 DAG 的 `on_failure_callback` 触发：
+`scheduler/alerts.py` 接入 4+1 个通道，由 DAG 的 `on_failure_callback` 触发：
 
 | 通道 | 默认 | 说明 |
 |---|---|---|
@@ -475,9 +498,7 @@ airflow backfill create --dag-id incremental_warehouse_dag \
 | HTTP Webhook | 需配置 | `DW_ALERT_WEBHOOK=<企业微信/钉钉/飞书机器人>` |
 | 邮件 SMTP | 需配置 | `DW_ALERT_SMTP_HOST/_PORT/_USER/_PASS/_TO` |
 
-设计原则：**绝不抛异常**（告警本身出错不能搞乱任务状态）、**分级推送**
-（只有「失败/质量阻断/超时」推给人，「重试中」只进台账，避免噪音淹没真问题）、
-**每条告警自带重跑命令 + 日志尾部**（收到就能直接动手）。
+设计原则：告警本身出错不影响任务状态；按级别推送，仅「失败 / 质量阻断 / 超时」推送给人，「重试中」只写入台账；每条告警附带重跑命令和日志尾部。
 
 自测：
 
@@ -502,14 +523,35 @@ CREATE USER 'warehouse'@'%' IDENTIFIED BY '<你的密码>';
 GRANT ALL ON dw_ads.* TO 'warehouse'@'%';
 ```
 
-### StarRocks 性能基准
+### 性能基准
+
+两侧查询一一对应（Q1~Q7、Q9 共 9 条；Q8/Q10 依赖 StarRocks 内部的 DWS/ADS 表，Spark 侧无对等数据源）。每条查询带结果行数校验：实测行数与预期不符时报错，该行不参与耗时对比。
 
 ```bash
+# StarRocks 侧（需容器在线：docker start starrocks）
 PYTHON=.venv/bin/python ./run.sh table starrocks/bench_starrocks.py
+
+# Spark 侧（需 HDFS 在线；*先停 StarRocks*，两引擎不并行测，避免 7GB 内存被顶爆）
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+export SPARK_HOME=<你的 Spark 安装路径>
+export PYSPARK_PYTHON=$PWD/.venv/bin/python
+.venv/bin/python starrocks/bench_spark.py              # --mode df（默认）→ bench_results/spark_bench.json
+.venv/bin/python starrocks/bench_spark.py --mode sql   # Spark SQL 写法 → bench_results/spark_bench_sql.json
 ```
 
-对比结果见 [legacy/PERFORMANCE_BENCHMARK.md](legacy/PERFORMANCE_BENCHMARK.md)。
-连接信息从环境变量读（`SR_HOST` / `SR_PORT` / `SR_USER` / `SR_PASSWORD`）。
+`--mode df|sql` 仅为写法差异（DataFrame API 与 Spark SQL），语义一致：实测两者结果行数 9/9 相同，耗时差异 −7.4%~+12.7%，无系统性偏差。使用 `--mode sql` 时两侧均为 SQL，对比条件更一致。
+
+单条重测（无需运行全套）：
+
+```bash
+.venv/bin/python starrocks/bench_spark.py --only Q7 --mode sql --out /tmp/q7.json
+```
+
+> `--only` 不带 `--out` 时只打印、不落盘，避免整套结果被覆盖成一条。
+
+结果 JSON 位于 `starrocks/bench_results/`（现行口径 109.8M 行 / 61 分区）。
+[legacy/PERFORMANCE_BENCHMARK.md](legacy/PERFORMANCE_BENCHMARK.md) 为 46.9M 行时期的旧报告，其 1.7×~12× 区间与现行的 3.3×~11× 基于不同数据，不能混用。
+连接信息从环境变量读取（`SR_HOST` / `SR_PORT` / `SR_USER` / `SR_PASSWORD`）。
 
 ### 导出给 Power BI
 
@@ -517,7 +559,7 @@ PYTHON=.venv/bin/python ./run.sh table starrocks/bench_starrocks.py
 python starrocks/export_ads_powerbi.py [输出目录]
 ```
 
-输出 UTF-8 **带 BOM** 的 CSV（保证 Excel / Power BI 打开中文不乱码）。
+输出 UTF-8 带 BOM 的 CSV（保证 Excel / Power BI 打开中文不乱码）。
 
 ---
 
@@ -525,9 +567,11 @@ python starrocks/export_ads_powerbi.py [输出目录]
 
 ### Q1：`AnalysisException: [PATH_NOT_FOUND] Path does not exist`
 
-**原因**：全量重建前清了 HDFS 目录，但表还注册在 metastore 上，Spark 建表时校验 LOCATION 存在。
+现象：建表时报此错误。
 
-**解法**：`etl/utils.py::drop_path()` 已经处理了 —— 删完立刻 `mkdirs()` 补回空目录：
+原因：全量重建前清理了 HDFS 目录，但表仍注册在 metastore 中，Spark 建表时校验 LOCATION 是否存在。
+
+解法：`etl/utils.py::drop_path()` 在删除后立即调用 `mkdirs()` 补回空目录：
 
 ```python
 fs.delete(jpath, True)     # 清内容
@@ -535,66 +579,71 @@ if keep_dir:
     fs.mkdirs(jpath)       # 补回空目录，否则建表报 PATH_NOT_FOUND
 ```
 
-如果你手动清了目录，补一次即可：`hdfs dfs -mkdir -p <path>`。
+手动清理目录后，执行一次 `hdfs dfs -mkdir -p <path>` 补回即可。
 
 ### Q2：`INSERT_COLUMN_ARITY_MISMATCH`
 
-**原因**：外部表 DROP 不删文件，旧实现的残留目录
-（比如旧 RFM 的 `as_of_dt` 分区）会被 Spark 推断进重建的表，列数对不上。
+现象：插入数据时报列数不匹配。
 
-**解法**：重建前用 `drop_path()` 清干净目标目录。
+原因：外部表 DROP 不删除文件，残留目录（例如旧 RFM 的 `as_of_dt` 分区）会被 Spark 推断进重建后的表，导致列数不一致。
+
+解法：重建前用 `drop_path()` 清理目标目录。
 
 ### Q3：日期分区串了（应该 10-01 的数据跑到 10-02）
 
-**原因**：时区。源时间戳是 UTC，如果 Spark 会话用本地时区（+8），
-`to_date` 会把每天 16:00–23:59 UTC 的记录挪到次日。
+现象：日期分区偏移一天。
 
-**解法**：`etl/utils.py::get_spark()` 里固定了时区：
+原因：时区差异。源时间戳为 UTC，Spark 会话若使用本地时区（+8），`to_date` 会把每天 16:00–23:59 UTC 的记录归到次日。
+
+解法：`etl/utils.py::get_spark()` 中固定时区：
 
 ```python
 .config("spark.sql.session.timeZone", "UTC")
 ```
 
-**这个配置不能删。**
+该配置不可删除。
 
 ### Q4：`Py4JNetworkError: Answer from Java side is empty`
 
-**原因**：大概率是 JVM 被内核 OOM killer 杀了，不是代码问题。
+现象：作业执行中断，报此错误。
 
-**排查**：
+原因：通常为 JVM 被内核 OOM killer 终止，而非代码问题。
+
+排查：
 
 ```bash
 dmesg | grep -iE "oom-kill|Killed process"
 ```
 
-**解法**：把 driver 内存降下来（`get_spark(memory="3g")`）；
-批量任务拆层、各起独立进程；用 `--skip-existing` 断点续跑。
+解法：降低 driver 内存（`get_spark(memory="3g")`）；批量任务按层拆分，各起独立进程；使用 `--skip-existing` 断点续跑。
 
 ### Q5：重跑同一天，结果和上次不一样（会话数、类目快照漂移）
 
-**原因**：去重的排序**不确定**。去重键 `(user_id, event_time, product_id, event_type)`
-的所有列都参与分组，所以**组内 `event_time` 必然相同**，只按它排序分不出胜负 ——
-保留哪条取决于扫描顺序。
+现象：同一日期重复运行，结果不一致。
 
-**解法**：`dwd_event_fact.py` 已把**全部剩余列**追加进排序做兜底：
+原因：去重排序不确定。去重键 `(user_id, event_time, product_id, event_type)` 的所有列都参与分组，组内 `event_time` 必然相同，仅按该列排序无法确定保留哪一条，结果取决于扫描顺序。
+
+解法：`dwd_event_fact.py` 将全部剩余列追加到排序中作为兜底：
 
 ```python
 tiebreak = ", ".join(["event_time"] + [c for c in FACT_COLUMNS if c not in DEDUP_KEYS + [...]])
 ```
 
-> **幂等的前提是确定性。** 窗口函数里 `ORDER BY` 有并列时，「重跑可重复」就是假的。
+> 幂等的前提是确定性。窗口函数的 `ORDER BY` 存在并列值时，重跑结果不可重复。
 
 ### Q6：`fatal: detected dubious ownership`（WSL 场景）
 
-**原因**：在 Windows 侧用 `wsl` 命令操作时**默认以 root 运行**，而文件属主是普通用户。
+现象：git 命令报 dubious ownership。
 
-**解法**：始终指定用户：
+原因：在 Windows 侧通过 `wsl` 命令操作时默认以 root 运行，而文件属主为普通用户。
+
+解法：显式指定用户：
 
 ```bash
 wsl -d Ubuntu-22.04 -u <你的用户名> -- bash -lc 'cd ~/repo && git ...'
 ```
 
-属主已被污染时修复：
+属主已被更改时修复：
 
 ```bash
 sudo chown -R $USER:$USER /path/to/repo
@@ -602,9 +651,11 @@ sudo chown -R $USER:$USER /path/to/repo
 
 ### Q7：`run.sh` 报找不到 Python
 
-**原因**：仓库里没有 `.venv`，且自动探测没命中。
+现象：`run.sh` 启动时报找不到 Python。
 
-**解法**：显式指定：
+原因：仓库中不存在 `.venv`，自动探测未命中。
+
+解法：显式指定：
 
 ```bash
 PYTHON=/home/<user>/my-spark/.venv/bin/python ./run.sh build --dt 2019-11-01
@@ -614,6 +665,6 @@ PYTHON=/home/<user>/my-spark/.venv/bin/python ./run.sh build --dt 2019-11-01
 
 ## 下一步
 
-- 想知道**代码怎么组织的、每层在干什么** → 看 [CODE_GUIDE.md](CODE_GUIDE.md)
-- 想知道**数据字典与实测数字** → 看 [incremental/WAREHOUSE_BUILD.md](incremental/WAREHOUSE_BUILD.md)
-- **日常怎么干活** → 看 [WORKFLOW.md](WORKFLOW.md)
+- 代码组织与各层职责：见 [CODE_GUIDE.md](CODE_GUIDE.md)
+- 数据字典与实测数字：见 [incremental/WAREHOUSE_BUILD.md](incremental/WAREHOUSE_BUILD.md)
+- 日常操作：见 [WORKFLOW.md](WORKFLOW.md)

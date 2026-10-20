@@ -1,21 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-dim.dim_product_scd2 — 商品维度类型2拉链表（SCD2）
-==================================================
-SCD2 拉链怎么来的（源里没有商品主数据表，只能自事实表反推）：
-  1. 每天每商品取**当日主导属性组合**（按出现次数，category_id 兜底排序）——消除单日噪声；
-  2. 按 product_id 按天排序，用 LAG 比对组合是否变化，变化即**开新版本**；
-  3. 同版本的连续日期折叠成一个区间：start=首日，end=末日+1（开区间）；当前版本 end=9999-12-31；
-  4. 代理键 dim_product_sk 按 (product_id, dw_start_date) 全局编号，版本粒度、与业务键解耦。
+dim.dim_product_scd2 — 商品维度 SCD2 拉链表
 
-两种运行方式：
-  --dt D                  增量：当日 delta 与当前版本比对 → 关旧版 + 开新版（不回扫历史明细）
-  --start D --end D       全量重建：按窗口重算整张拉链表
+源无商品主数据，按天取各商品主导属性组合，属性变化即开新版本，连续同版本
+日期折叠为区间；当前版本 dw_end_date = 9999-12-31；--dt 增量，--start/--end 全量重建。
 
-用法：
-  python etl/dim/dim_product_scd2.py --dt 2019-11-01
-  python etl/dim/dim_product_scd2.py --start 2019-10-01 --end 2019-10-31
+用法：python etl/dim/dim_product_scd2.py --dt D | --start D --end D
 """
 
 import argparse
@@ -33,22 +24,22 @@ STAGING = f"{WAREHOUSE}/dim/_staging_scd2"
 SCD2_COLS = ("dim_product_sk, product_id, category_id, category_code, brand, "
              "dw_start_date, dw_end_date, dw_is_current")
 
-# ---------------- 全量重建：窗口内重算拉链 ----------------
+# 全量重建：窗口内重算拉链
 SCD2_SQL = """
-WITH daily AS (                       -- 日 × 商品 × 属性组合 出现次数
+WITH daily AS (
     SELECT {p} AS event_date, product_id, category_id, category_code, brand, COUNT(*) AS cnt
     FROM {fact}
     WHERE {p} BETWEEN '{start}' AND '{end}'
     GROUP BY {p}, product_id, category_id, category_code, brand
 ),
-dominant AS (                         -- 当日主导组合（同票数按 category_id 兜底，保证确定性）
+dominant AS (                         -- 同票数按 category_id 兜底，保证确定性
     SELECT event_date, product_id, category_id, category_code, brand,
            ROW_NUMBER() OVER (PARTITION BY event_date, product_id
                               ORDER BY cnt DESC, category_id) AS rn
     FROM daily
 ),
 d AS (SELECT * FROM dominant WHERE rn = 1),
-marked AS (                           -- 与前一版本比对，标记版本起点
+marked AS (
     SELECT *,
            COALESCE(category_id, -1) || '|' || COALESCE(category_code, '') || '|' || COALESCE(brand, '') AS combo,
            LAG(COALESCE(category_id, -1) || '|' || COALESCE(category_code, '') || '|' || COALESCE(brand, ''))
@@ -62,14 +53,14 @@ versioned AS (
                      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS version_no
     FROM marked
 ),
-spans AS (                            -- 每个版本折叠成 [start, last_seen]
+spans AS (
     SELECT product_id, category_id, category_code, brand,
            MIN(event_date) AS dw_start_date,
            MAX(event_date) AS last_seen
     FROM versioned
     GROUP BY product_id, version_no, category_id, category_code, brand
 ),
-ranked AS (                           -- 末版本 = 开放版本（当前版本）
+ranked AS (
     SELECT *, ROW_NUMBER() OVER (PARTITION BY product_id
                                  ORDER BY dw_start_date DESC) AS rn_desc
     FROM spans
@@ -78,25 +69,23 @@ SELECT
     ROW_NUMBER() OVER (ORDER BY product_id, dw_start_date) AS dim_product_sk,
     product_id, category_id, category_code, brand,
     dw_start_date,
-    -- 开区间上界：非当前版本 = 末次出现日 + 1 天（= 下一版本起始日），保证区间无重叠、无间隙；
-    -- 当前版本 = 9999-12-31。
-    -- 注意：判定"当前"用**每商品最后一个版本**，而不是"末次出现日 = 统计窗口末日"——
-    -- 商品中途不再出现不等于属性变更（缺观测 ≠ 变更），用它判定会让 9 万+ 商品没有当前版本。
+    -- 非当前版本 end = 末次出现日 + 1（开区间），当前版本为 9999-12-31；
+    -- "当前"按每商品最后一个版本判定，缺观测不等于属性变更。
     CASE WHEN rn_desc = 1 THEN DATE '9999-12-31'
          ELSE DATE_ADD(last_seen, 1) END  AS dw_end_date,
     CASE WHEN rn_desc = 1 THEN 1 ELSE 0 END AS dw_is_current
 FROM ranked
 """
 
-# ---------------- 增量：当日 delta 与"当前版本"比对 ----------------
+# 增量：当日 delta 与当前版本比对
 SCD2_INCREMENTAL_SQL = """
-WITH daily AS (                       -- ① 当日各属性组合的出现次数（只扫这一天分区）
+WITH daily AS (
     SELECT product_id, category_id, category_code, brand, COUNT(*) AS cnt
     FROM {fact}
     WHERE {p} = '{dt}'
     GROUP BY product_id, category_id, category_code, brand
 ),
-dominant AS (                         -- ② 当日主导组合（同票数按 category_id 兜底）
+dominant AS (                         -- 同票数按 category_id 兜底
     SELECT product_id, category_id, category_code, brand,
            ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY cnt DESC, category_id) AS rn
     FROM daily
@@ -106,29 +95,29 @@ today AS (
            COALESCE(category_id, -1) || '|' || COALESCE(category_code, '') || '|' || COALESCE(brand, '') AS combo
     FROM dominant WHERE rn = 1
 ),
-cur AS (                              -- ③ 当前开放版本（来自快照，不是活表）
+cur AS (                              -- 当前开放版本来自快照，避免读写同一张表
     SELECT dim_product_sk, product_id, category_id, category_code, brand, dw_start_date,
            COALESCE(category_id, -1) || '|' || COALESCE(category_code, '') || '|' || COALESCE(brand, '') AS combo
     FROM t_scd2_snapshot WHERE dw_is_current = 1
 ),
-closed AS (                           -- ④ 闭链：属性变了 → 旧版本 end = 变更日（开区间上界）
+closed AS (                           -- 闭链：属性变化，旧版本 end = 变更日
     SELECT c.dim_product_sk, c.product_id, c.category_id, c.category_code, c.brand,
            c.dw_start_date, DATE '{dt}' AS dw_end_date, CAST(0 AS INT) AS dw_is_current
     FROM cur c JOIN today t ON c.product_id = t.product_id
     WHERE c.combo <> t.combo
 ),
-opened AS (                           -- ⑤ 开链：属性变了 或 全新商品
+opened AS (                           -- 开链：属性变化或全新商品
     SELECT t.product_id, t.category_id, t.category_code, t.brand
     FROM today t LEFT JOIN cur c ON t.product_id = c.product_id
     WHERE c.product_id IS NULL OR c.combo <> t.combo
 ),
-new_sk AS (                           -- 代理键只追加、不重排（接现有 max+1）
+new_sk AS (                           -- 代理键只追加，接现有 max+1
     SELECT (COALESCE((SELECT MAX(dim_product_sk) FROM t_scd2_snapshot), 0)
             + ROW_NUMBER() OVER (ORDER BY product_id)) AS dim_product_sk,
            product_id, category_id, category_code, brand
     FROM opened
 ),
-kept AS (                             -- ⑥ 保留：除被闭链的当前版本外，全部原样保留
+kept AS (                             -- 保留未被闭链的版本
     SELECT s.* FROM t_scd2_snapshot s
     LEFT JOIN closed c ON s.dim_product_sk = c.dim_product_sk
     WHERE c.dim_product_sk IS NULL
@@ -165,7 +154,7 @@ def _validate(spark, dt=None):
             GROUP BY product_id, dw_start_date HAVING COUNT(*) > 1
         ) t
     """).collect()[0]["c"]
-    flag = "✅" if bad_current == 0 and bad_range == 0 and dup_start == 0 else "❌"
+    flag = "OK" if bad_current == 0 and bad_range == 0 and dup_start == 0 else "FAIL"
     print(f"  {flag} 拉链校验：当前版本数≠1 的商品 {bad_current} / 区间重叠 {bad_range}"
           f" / 同商品同日重复起始 {dup_start}（均须为 0）")
 
@@ -190,15 +179,9 @@ def rebuild(spark, start, end):
 
 
 def build_inc(spark, dt):
-    """SCD2 单日增量 merge。
+    """SCD2 单日增量。
 
-    为什么不能一条 SQL 写完：Spark 会拦下"目标表同时被读取"的写法——
-    `[UNSUPPORTED_OVERWRITE.TABLE] Can't overwrite the target that is also being read from`。
-    把拉链表 cache 成 DataFrame 再建视图**没用**，视图只是别名，分析器照样穿透到表本身。
-
-    因此分三步：① 读现有拉链（落 parquet 快照）算新状态 → ② 落到临时路径 →
-    ③ 从临时路径 INSERT OVERWRITE 回表。这正是"增量计算 + 小表整表重写"的落地形态
-    （Hive 外部表没有 MERGE/UPSERT，17 万行的重写是秒级）。
+    Spark 不允许写入的目标表同时被读取，故先落快照，再经临时路径写回。
     """
     snap_path = f"{STAGING}_snap"
     drop_path(spark, snap_path)
@@ -243,7 +226,7 @@ def main():
         print(f"🏗  {TABLE} 全量重建 {args.start} ~ {args.end}")
         drop_path(spark, STAGING)      # 重建前清旧文件（外部表 DROP 不删文件）
         rebuild(spark, args.start, args.end)
-    print("✅ 完成")
+    print("OK: 完成")
     spark.stop()
 
 

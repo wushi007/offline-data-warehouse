@@ -2,13 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 ads.ads_product_hot_rank_daily — 商品热榜 Top100（逐日）
-========================================================
-来源 dws_product_daily；粒度：每天 Top100（31 天 = 3,100 行）。
-排名口径：销售额降序，同额按销量降序。
-
-用法：
-  python etl/ads/ads_product_hot_rank_daily.py --dt 2019-10-01
-  python etl/ads/ads_product_hot_rank_daily.py --start 2019-10-01 --end 2019-10-31
+来源 dws_product_daily；粒度每天 Top100，排名按销售额降序、同额按销量降序。
+用法：python etl/ads/ads_product_hot_rank_daily.py --dt 2019-10-01，或 --start/--end 指定区间。
 """
 
 import argparse
@@ -64,7 +59,7 @@ def main():
     print(f"📈 {TABLE} {len(days)} 天：{days[0]} ~ {days[-1]}")
     for d in days:
         build(spark, d)
-    print("✅ 完成")
+    print("OK: 完成")
     spark.stop()
 
 
