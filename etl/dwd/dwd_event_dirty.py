@@ -2,14 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 dwd.dwd_event_dirty — 清洗被拦下的脏数据隔离表
-================================================
-拦下即留痕：不静默丢弃、不污染事实表，且保证
-    ODS 行数 = dwd_event_fact(干净+去重后) + dwd_event_dirty + 去重行数
-对得平（dirty_reason 见 etl/dwd/rules.py）。
 
-用法：
-  python etl/dwd/dwd_event_dirty.py --dt 2019-10-01
-  python etl/dwd/dwd_event_dirty.py --start 2019-10-01 --end 2019-10-31
+脏行留痕而不丢弃，保证 ODS = dwd_event_fact（去重后）+ dwd_event_dirty + 去重行数。
+dirty_reason 定义见 etl/dwd/rules.py。
+
+用法：python etl/dwd/dwd_event_dirty.py --dt D | --start D --end D
 """
 
 import argparse
@@ -45,7 +42,6 @@ def build(spark, dt):
         "SELECT COUNT(*) AS c FROM t_tagged WHERE dirty_reason IS NOT NULL"
     ).collect()[0]["c"]
 
-    # 按原因拆开打印，便于一眼看出当天是哪种脏（全 0 说明源数据干净）
     if cnt:
         detail = spark.sql(f"""
             SELECT dirty_reason, COUNT(*) AS c FROM t_tagged
@@ -79,7 +75,7 @@ def main():
     total = 0
     for d in days:
         total += build(spark, d)
-    print(f"✅ {TABLE} 合计 {total:,} 行")
+    print(f"OK: {TABLE} 合计 {total:,} 行")
     spark.stop()
 
 

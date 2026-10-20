@@ -1,16 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-ods_import_bulk.py — ODS 批量导入（单次扫描整份 CSV，切出全部日期分区）
-========================================================================
-与 ods_import.py 同口径（零修改、UTC 切分区），但一次读完整份 CSV、
-按 event_date 全量分区写出，避免按天重复扫描数 GB 源文件。
+ods_event_log_bulk.py — ODS 批量导入
 
-用于把 2019-Oct.csv 的 31 天一次性落盘到 ods_event_log。
-已存在的分区在 dynamic overwrite 下保持不变（不影响 11 月已建分区）。
+单次扫描整份 CSV，按 event_date 写出全部分区，避免按天重复扫描大文件；
+已有分区在 overwrite 下保持不变。与 ods_event_log.py 口径一致。
 
-用法：
-  python etl/ods_import_bulk.py --csv hdfs://localhost:8020/home/lst/hadoop-data/eCommerce_behavior/2019-Oct.csv
+用法：python etl/ods/ods_event_log_bulk.py --csv <源 CSV 的 HDFS 路径>
 """
 
 import argparse
@@ -19,8 +15,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from config.config import ODS_PATH, SRC_SCHEMA  # noqa: E402
+from config.config import DBS, ODS_PATH, SRC_SCHEMA  # noqa: E402
 from etl.utils import get_spark  # noqa: E402
+
+# MSCK REPAIR 目标表，必须为库名.表名
+TABLE = f"{DBS['ods']}.ods_event_log"
 
 
 def import_csv(spark, csv_path: str):
@@ -44,23 +43,20 @@ def import_csv(spark, csv_path: str):
       .option("compression", "snappy") \
       .parquet(ODS_PATH)
 
-    # ★ 补注册分区：这里是 **DataFrame 直写路径**，不是 INSERT INTO TABLE，
-    #   所以 Hive metastore **不会**自动登记这些分区（踩过：物理 61 个分区、
-    #   metastore 只有 34 个）。按路径读的作业不受影响，但 Hive/SQL 侧会看不到新分区。
     register_partitions(spark)
 
-    print(f"✅ ODS 批量导入完成：{ODS_PATH}（{len(dates)} 个分区，dynamic 覆盖不影响已有分区）")
+    print(f"OK: ODS 批量导入完成：{ODS_PATH}（{len(dates)} 个分区，dynamic 覆盖不影响已有分区）")
     return len(dates)
 
 
 def register_partitions(spark):
-    """MSCK REPAIR 把 HDFS 上新增的分区目录登记进 metastore（目录与注册必须一起动）。"""
+    """MSCK REPAIR 登记 HDFS 新增分区；DataFrame 直写不会自动更新 metastore。"""
     try:
         spark.sql(f"MSCK REPAIR TABLE {TABLE}")
         n = spark.sql(f"SHOW PARTITIONS {TABLE}").count()
-        print(f"  ✅ 分区已注册（metastore 现有 {n} 个分区）")
-    except Exception as e:  # 表还没建等情况：不致命，按路径读仍可用
-        print(f"  ⚠️ MSCK REPAIR 失败（不致命，按路径读不受影响）：{str(e)[:100]}")
+        print(f"  OK: 分区已注册（metastore 现有 {n} 个分区）")
+    except Exception as e:  # 不致命，按路径读仍可用
+        print(f"  WARN: MSCK REPAIR 失败（不致命，按路径读不受影响）：{str(e)[:100]}")
 
 
 if __name__ == "__main__":

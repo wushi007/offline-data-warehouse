@@ -1,22 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-dim.dim_user — 用户基础维度（含时间属性）
-==========================================
-时间属性：first_seen_date / last_seen_date / active_days / first_purchase_date / purchase_days，
-支撑新老客识别与用户生命周期分析。
+dim.dim_user — 用户维度（含时间属性）
 
-两种运行方式：
-  --start D --end D   全量重建：扫**全部 DWD 分区**（不限窗口）——
-                      "首次活跃日"跨全量历史才有意义，不该随 SCD2 的窗口变化
-  --dt D              增量：只读当天分区 + 小维表快照，不再全扫 DWD
+first_seen/last_seen、active_days、first_purchase_date、purchase_days。
+全量重建扫全部 DWD 分区，--dt 增量只读当天分区；累加字段仅在 dt 晚于已记录 last_seen 时累加。
 
-增量幂等：MIN/MAX 语义天然幂等；累加字段（active_days / purchase_days）必须加守卫——
-只有 dt 比已记录的 last_seen 更晚才累加，否则重跑同一天会重复 +1。
-
-用法：
-  python etl/dim/dim_user.py --dt 2019-11-01
-  python etl/dim/dim_user.py --start 2019-10-01 --end 2019-10-31
+用法：python etl/dim/dim_user.py --dt D | --start D --end D
 """
 
 import argparse
@@ -60,19 +50,21 @@ WITH today AS (
 )
 SELECT
     COALESCE(o.user_id, t.user_id)                                        AS user_id,
-    -- MIN/MAX 语义天然幂等：重跑同一天结果不变
+    -- MIN/MAX 语义幂等，重跑同一天结果不变
     LEAST(COALESCE(o.first_seen_date, t.min_d), COALESCE(t.min_d, o.first_seen_date))
                                                                          AS first_seen_date,
     GREATEST(COALESCE(o.last_seen_date, t.max_d), COALESCE(t.max_d, o.last_seen_date))
                                                                          AS last_seen_date,
-    -- 累加字段必须加幂等守卫：只有 dt 比已记录的 last_seen 更晚才累加，
-    -- 否则重跑同一天会把活跃天数重复 +1（增量最容易踩的坑）
-    CASE WHEN o.last_seen_date IS NULL OR o.last_seen_date < DATE '{dt}'
+    -- 累加字段仅在 dt 晚于已记录 last_seen 时累加，重跑同一天不会重复 +1。
+    -- 左独行的 days_delta 为 NULL，必须先短路，否则 int + NULL 会把累计天数清零。
+    CASE WHEN t.days_delta IS NULL THEN o.active_days
+         WHEN o.last_seen_date IS NULL OR o.last_seen_date < DATE '{dt}'
          THEN COALESCE(o.active_days, 0) + t.days_delta
          ELSE o.active_days END                                          AS active_days,
     LEAST(COALESCE(o.first_purchase_date, t.fp), COALESCE(t.fp, o.first_purchase_date))
                                                                          AS first_purchase_date,
-    CASE WHEN o.last_seen_date IS NULL OR o.last_seen_date < DATE '{dt}'
+    CASE WHEN t.pd_delta IS NULL THEN o.purchase_days
+         WHEN o.last_seen_date IS NULL OR o.last_seen_date < DATE '{dt}'
          THEN COALESCE(o.purchase_days, 0) + t.pd_delta
          ELSE o.purchase_days END                                        AS purchase_days
 FROM t_snapshot o FULL OUTER JOIN today t ON o.user_id = t.user_id
@@ -115,7 +107,7 @@ def main():
     else:
         print(f"🏗  {TABLE} 全量重建")
         rebuild(spark)
-    print("✅ 完成")
+    print("OK: 完成")
     spark.stop()
 
 

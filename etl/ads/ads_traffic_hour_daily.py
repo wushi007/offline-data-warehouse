@@ -2,13 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 ads.ads_traffic_hour_daily — 分时大盘（运营时段表）
-===================================================
-来源 dws_traffic_hour_daily；粒度：event_date × event_hour（31 天 = 744 行）。
-在 DWS 分时表上加"报表语义"：时段分桶 / PV 与订单占比 / 峰值小时标记 / 分时转化率。
-
-用法：
-  python etl/ads/ads_traffic_hour_daily.py --dt 2019-10-01
-  python etl/ads/ads_traffic_hour_daily.py --start 2019-10-01 --end 2019-10-31
+来源 dws_traffic_hour_daily；粒度 event_date × event_hour；增加时段分桶、PV/订单占比、峰值标记与分时转化率。
+用法：python etl/ads/ads_traffic_hour_daily.py --dt 2019-10-01，或 --start/--end 指定区间。
 """
 
 import argparse
@@ -71,7 +66,7 @@ def main():
     print(f"📈 {TABLE} {len(days)} 天：{days[0]} ~ {days[-1]}")
     for d in days:
         build(spark, d)
-    print("✅ 完成")
+    print("OK: 完成")
     spark.stop()
 
 

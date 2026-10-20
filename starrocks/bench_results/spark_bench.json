@@ -1,82 +1,101 @@
 {
   "engine": "spark",
   "version": "3.5.9",
-  "total_rows": 46908364,
+  "total_rows": 109806507,
   "master": "local[4]",
   "driver_memory": "2500m",
   "method": "warmup x1 + timed x2 (best)",
+  "corrections": {
+    "date": "2026-10-06",
+    "note": "★ Q1~Q9（除 Q7）的 cold_ms / best_ms / avg_ms 均为 2026-10-05 20:40 原始测量值，未重跑、未改动。Q7 因原查询有缺陷，已于 2026-10-06 修复脚本后单独重测，见该条目的 remeasured 字段。",
+    "desc_Q4": "原『Q4 按日聚合 GMV（34 组）』—— 34 是 46.9M 行时代的旧分组数；本快照实测 rows=61，改为『61 组』。（脚本 bench_spark.py 当时已改成 61 组，但结果 JSON 是在脚本改动之前生成的，两边对不上。）",
+    "desc_Q9": "原『Q9 购买明细按用户分组（37 万组）』—— 37 万是旧值；本快照实测 rows=707,466，改为『71 万组』。",
+    "desc_Q2": "原『Q2 分区裁剪（单天 COUNT）』—— 已统一改名为『单天裁剪』。注意两侧机制不同：**Spark 侧是真·分区裁剪**（HDFS parquet 按 event_date 分了 61 个目录）；**StarRocks 侧没有 PARTITION BY**（只有一个默认分区），靠 DISTRIBUTED BY HASH(event_date) 的分桶裁剪达到同等语义。所以这个 5.7× 里有一部分是『parquet 分区裁剪 vs 分桶裁剪』的差异，不只是引擎差异。",
+    "Q7_fixed": "★ Q7 是本次唯一重测的条目。原查询把 F.when(cond, \"user_id\") 的第二个参数写成字符串字面量（而非列引用 F.col(\"user_id\")），countDistinct 恒等于 1 —— 在真实数据上实测返回 (1, 1, 1)，而 StarRocks 侧真值为 (230118, 24606, 18582)。所以原来的 161.8ms 只是『扫单天分区 + 3 次对常量去重』的耗时，不是漏斗 UV 耗时。修复后重测为 best 405.5ms，且结果与 StarRocks 逐值一致。旧值保留在 prev_invalid 里备查。",
+    "exp_rows_gate": "已于 2026-10-06 给 bench_spark.py / bench_starrocks.py 加『结果行数闸门』：每条查询声明预期返回行数，实测不等即记 error。这道闸门正是为拦截 Q7 这类『语义错了却照记耗时』的问题而加。",
+    "session_mix": "⚠️ Q7 的 405.5ms 是 2026-10-06 14:42 单独重测的（当时先停 StarRocks 再启 HDFS，与该侧 Q7 重测同为同一时段、同一台机器）；其余 8 条仍是 2026-10-05 那一轮。跨时段混合引用时请留意。"
+  },
   "queries": [
     {
       "qid": "Q1",
       "desc": "Q1 真实列扫描 SUM(price)",
       "rows": 1,
-      "cold_ms": 925.0,
-      "best_ms": 852.2,
-      "avg_ms": 863.4
+      "cold_ms": 1441.5,
+      "best_ms": 1397.4,
+      "avg_ms": 1400.7
     },
     {
       "qid": "Q1m",
       "desc": "Q1m COUNT(*)",
       "rows": 1,
-      "cold_ms": 259.9,
-      "best_ms": 257.5,
-      "avg_ms": 262.1
+      "cold_ms": 465.6,
+      "best_ms": 425.1,
+      "avg_ms": 430.2
     },
     {
       "qid": "Q2",
-      "desc": "Q2 分区裁剪（单天 COUNT）",
+      "desc": "Q2 单天裁剪（date= 过滤 COUNT）",
       "rows": 1,
-      "cold_ms": 83.1,
-      "best_ms": 77.8,
-      "avg_ms": 80.3
+      "cold_ms": 62.4,
+      "best_ms": 62.3,
+      "avg_ms": 62.4
     },
     {
       "qid": "Q3",
       "desc": "Q3 小基数分组（event_type）",
       "rows": 3,
-      "cold_ms": 1065.3,
-      "best_ms": 980.0,
-      "avg_ms": 983.0
+      "cold_ms": 1851.2,
+      "best_ms": 1795.7,
+      "avg_ms": 1801.6
     },
     {
       "qid": "Q4",
-      "desc": "Q4 按日聚合 GMV（34 组）",
-      "rows": 34,
-      "cold_ms": 1018.2,
-      "best_ms": 990.5,
-      "avg_ms": 991.5
+      "desc": "Q4 按日聚合 GMV（61 组）",
+      "rows": 61,
+      "cold_ms": 1940.1,
+      "best_ms": 1977.8,
+      "avg_ms": 2006.5
     },
     {
       "qid": "Q5",
       "desc": "Q5 UV 精确去重（全量 user_id）",
       "rows": 1,
-      "cold_ms": 4090.6,
-      "best_ms": 4021.6,
-      "avg_ms": 4043.9
+      "cold_ms": 9478.1,
+      "best_ms": 7808.7,
+      "avg_ms": 7824.8
     },
     {
       "qid": "Q6",
       "desc": "Q6 大基数分组（product_id）",
-      "rows": 169651,
-      "cold_ms": 2736.5,
-      "best_ms": 2694.5,
-      "avg_ms": 2712.6
+      "rows": 206876,
+      "cold_ms": 4933.4,
+      "best_ms": 4872.6,
+      "avg_ms": 5117.5
     },
     {
       "qid": "Q7",
       "desc": "Q7 漏斗 3 层 UV（单天）",
       "rows": 1,
-      "cold_ms": 245.7,
-      "best_ms": 213.6,
-      "avg_ms": 215.9
+      "cold_ms": 558.2,
+      "best_ms": 405.5,
+      "avg_ms": 413.1,
+      "remeasured": "2026-10-06T14:42",
+      "verified_values": [230118, 24606, 18582],
+      "prev_invalid": {
+        "cold_ms": 190.5,
+        "best_ms": 161.8,
+        "avg_ms": 165.8,
+        "measured_at": "2026-10-05T20:40",
+        "reason": "F.when(cond, \"user_id\") 传的是字符串字面量而非列引用，countDistinct 恒为 1（真实数据实测返回 (1,1,1)），耗时不含真实漏斗去重。"
+      }
     },
     {
       "qid": "Q9",
-      "desc": "Q9 购买明细按用户分组（37 万组）",
-      "rows": 373611,
-      "cold_ms": 3356.3,
-      "best_ms": 3486.6,
-      "avg_ms": 3769.7
+      "desc": "Q9 购买明细按用户分组（71 万组）",
+      "rows": 707466,
+      "cold_ms": 8053.2,
+      "best_ms": 8506.4,
+      "avg_ms": 8581.9
     }
   ]
 }

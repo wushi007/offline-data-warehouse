@@ -2,10 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 export_ads_powerbi.py — 导出 StarRocks ADS 结果到 CSV，供 Power BI / Excel 导入
-==============================================================================================
-- 导出表: 5 张 ADS + dim_category（供 Power BI 关联类目）
-- 输出: UTF-8 BOM CSV（中文正常），默认写到 Windows 可访问的 Documents/starrocks_ads/
-- 用法: <项目根目录>/.venv/bin/python etl/export_ads_powerbi.py [输出目录]
+导出: 5 张 ADS + dim_category，UTF-8 BOM CSV
+输出: 默认 Documents/starrocks_ads/（WSL），可用 DW_EXPORT_DIR 覆盖
+用法: .venv/bin/python starrocks/export_ads_powerbi.py [输出目录]
 """
 
 import csv
@@ -15,11 +14,15 @@ from pathlib import Path
 
 import pymysql
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from config.env import load_env  # noqa: E402
+
+load_env()
+
 SR_FE = (os.environ.get("SR_HOST", "127.0.0.1"), int(os.environ.get("SR_PORT", "9030")))
 SR_USER, SR_PASS = os.environ.get("SR_USER", "root"), os.environ.get("SR_PASSWORD", "")
 DB = "dwd"
-# 默认输出目录：优先环境变量；WSL 下默认写到 Windows 的 Documents（Power BI 可直接打开），
-# 非 WSL 环境则退回当前目录下的 starrocks_ads/
+# 默认输出目录：WSL 下写 Windows Documents（Power BI 可直接打开），否则用当前目录
 _WIN_DOCS = Path("/mnt/c/Users/{}".format(os.environ.get("USER", "user"))) / "Documents"
 DEFAULT_OUT = Path(
     os.environ.get(
@@ -57,7 +60,7 @@ def main():
             w.writerow(cols)
             for r in rows:
                 w.writerow(["" if v is None else v for v in r])
-        print(f"✅ {name:<34} {len(rows):>9,} 行  {path.name}")
+        print(f"OK: {name:<34} {len(rows):>9,} 行  {path.name}")
 
     # README 说明
     readme = out_dir / "README.txt"

@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# ============================================================
-# 电商离线数仓 · 便捷启动脚本
-#
-# 代码组织：etl/<层>/<表>.py —— 每一层一个文件夹、每一张表一个文件，
-#           每张表都能单独跑（一个进程一个 SparkSession，一张表一张表跑）。
-# ============================================================
+# 电商离线数仓启动脚本。
+# 代码组织：etl/<层>/<表>.py，每张表均可单独运行。
 set -euo pipefail
 cd "$(dirname "$0")"
+
+# 敏感配置统一来自项目根目录 .env
+if [ -f .env ]; then
+    set -a
+    . ./.env
+    set +a
+fi
 
 # JDK 17：环境变量优先；未设置时用 Debian/Ubuntu 的默认位置
 if [ -z "${JAVA_HOME:-}" ]; then
@@ -19,18 +22,11 @@ if [ -n "${JAVA_HOME:-}" ]; then
     export PATH="$JAVA_HOME/bin:$PATH"
 fi
 
-# Spark / Hadoop 目录：决定 Hive metastore 与 catalogImplementation 能否生效
-# ★ 为什么必须解析（不是可有可无）：
-#   pyspark 找不到 SPARK_HOME 时会回退到 venv 里的 pyspark 包目录，那里没有
-#   conf/spark-defaults.conf —— 而 spark.sql.catalogImplementation=hive 与
-#   metastore 的 JDBC 连接都写在那，后果是建表直接报
-#     NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT
-#   交互式终端里 .bashrc 已经导出这些变量，所以手敲看不出来；
-#   但非交互场景（脚本 / cron / CI / 未显式传 env 的调度器）会静默丢 Hive 支持
-#   —— .bashrc 开头那句 "If not running interactively, don't do anything" 就是原因。
-#   探测顺序与 scheduler/incremental_warehouse_dag.py 保持一致。
+# Spark/Hadoop 目录决定 Hive 支持：未设置 SPARK_HOME 时 pyspark 会回退到 venv
+# 包目录，读不到 conf/spark-defaults.conf，建表报 NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT。
+# 非交互场景（脚本/cron/调度器）不会加载 .bashrc，故需在此探测。
 resolve_dir() {
-    # $1 = 当前值（环境变量，可能为空或失效）；其余参数 = glob 模式，按顺序探测
+    # $1 为当前值，其余参数为 glob 模式，按顺序探测
     local cur="$1"; shift
     if [ -n "$cur" ] && [ -d "$cur" ]; then printf '%s' "$cur"; return 0; fi
     local pat matches d best
@@ -56,7 +52,7 @@ export PATH
 
 if [ -z "${SPARK_HOME:-}" ]; then
     cat >&2 <<'WARN'
-⚠️  未找到 Spark 安装目录（SPARK_HOME 未设置，且探测 ~/apps、/opt、/usr/local 均失败）
+WARN: 未找到 Spark 安装目录（SPARK_HOME 未设置，且探测 ~/apps、/opt、/usr/local 均失败）
     后果：pyspark 会回退到 venv 内的包目录，读不到 conf/spark-defaults.conf，
           Hive 支持与 metastore 连接会失效 → 建表报
           NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT
@@ -64,9 +60,8 @@ if [ -z "${SPARK_HOME:-}" ]; then
 WARN
 fi
 
-# 解释器解析顺序：PYTHON 环境变量 > 仓库内 .venv > 同级 .venv > 家目录 .venv > 系统 python3
-# 可用 PYTHON=/path/to/python ./run.sh ... 显式指定
-# 若 venv 在仓库外，推荐在仓库根建软链接：ln -s /path/to/venv .venv
+# 解释器顺序：PYTHON 环境变量 > 仓库内 .venv > 同级 .venv > ~/.venv > python3
+# venv 在仓库外时，可在仓库根建软链接：ln -s /path/to/venv .venv
 resolve_python() {
     if [ -n "${PYTHON:-}" ]; then echo "$PYTHON"; return; fi
     local c
@@ -79,7 +74,7 @@ resolve_python() {
 }
 PY="$(resolve_python)"
 
-# 所有 Spark 调用都过串行闸门：同一时刻只有一个 SparkSession（抢不到锁会排队等待）
+# 所有 Spark 调用经串行闸门，同一时刻只有一个 SparkSession
 LOCKED=./etl/run_locked.sh
 
 run() { $LOCKED "$PY" "$@"; }

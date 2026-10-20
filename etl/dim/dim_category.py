@@ -1,15 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-dim.dim_category — 品类基础维度（自 category_code 拆层级）
-===========================================================
-两种运行方式：
-  --start D --end D   全量重建：扫全部 DWD 分区
-  --dt D              增量：只读当天分区 + 小维表快照；品类编码变了以当天为准（覆盖语义）
+dim.dim_category — 品类维度（从 category_code 拆层级）
 
-用法：
-  python etl/dim/dim_category.py --dt 2019-11-01
-  python etl/dim/dim_category.py --start 2019-10-01 --end 2019-10-31
+--dt 增量只读当天分区与小维表快照，品类编码变化以当天为准；
+--start/--end 全量重建。
+
+用法：python etl/dim/dim_category.py --dt D | --start D --end D
 """
 
 import argparse
@@ -54,7 +51,7 @@ t2 AS (
 )
 SELECT
     COALESCE(o.category_id, t2.category_id)                              AS category_id,
-    -- 品类编码变了就以当天为准（覆盖语义，重跑同一天结果一致）
+    -- 编码变化以当天为准，重跑同一天结果一致
     COALESCE(t2.category_code, o.category_code)                          AS category_code,
     COALESCE(t2.l1, o.category_l1)                                       AS category_l1,
     COALESCE(t2.l2, o.category_l2)                                       AS category_l2,
@@ -92,7 +89,7 @@ def main():
     else:
         print(f"🏗  {TABLE} 全量重建")
         rebuild(spark)
-    print("✅ 完成")
+    print("OK: 完成")
     spark.stop()
 
 

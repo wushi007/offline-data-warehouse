@@ -1,26 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-load_to_starrocks.py —— 把导出的 CSV 灌进 StarRocks
-====================================================
-配套 export_hive_to_csv.py：那边先导出，这边再灌。两步分开是为了**串行**跑，
-避免 Spark 驱动和 StarRocks 容器同时吃内存（本机只有 7.6G，同时跑必 OOM）。
-
-★ 表模型为什么全用 Duplicate Key（明细模型）★
-  · 这次的目标是「复刻」——把 Spark 已经跑出来的结果原样搬过去，不做任何聚合语义
-  · Primary Key / Aggregate 模型都要求 key 列 NOT NULL，Hive 侧只要有 NULL 就会灌失败
-  · Duplicate Key 的 key 只是排序键/前缀索引，不要求唯一、不要求非空，最稳妥
-  · 代价是少了主键去重能力；真需要时再对 DIM 单独改成 Primary Key 模型
-
-★ 幂等：默认**先 TRUNCATE 再灌**。
-  Stream Load 本身是追加语义，重跑一次就会翻倍（ads_trade_daily 试灌过一次后
-  再跑全量，行数从 35 变成 70 才发现）。对「复刻」这种全量重建场景，
-  重跑必须得到同样的结果，所以默认每次清空。真要追加时用 --append。
-
-用法：
-  python starrocks/load_to_starrocks.py --manifest ~/sr_export/manifest.json
-  python starrocks/load_to_starrocks.py --only dws_traffic_hour_daily
-  python starrocks/load_to_starrocks.py --dry-run        # 只打印会做什么，不执行
+load_to_starrocks.py — 把导出的 CSV 灌进 StarRocks
+配套 export_hive_to_csv.py，两步分开执行，避免 Spark 与容器同时占内存。
+全表用 Duplicate Key：目标为逐值复刻，AGGREGATE 会收敛行数，UNIQUE 索引写入放大。
+默认先 TRUNCATE 再灌；Stream Load 为追加语义，重跑会翻倍，追加需显式 --append。
+用法: python starrocks/load_to_starrocks.py --manifest ~/sr_export/manifest.json [--dry-run]
 """
 
 import argparse
@@ -32,12 +17,8 @@ from pathlib import Path
 
 import pymysql
 
-# ---------------------------------------------------------------------------
-# 目标表结构（StarRocks 侧）
-#   columns : (列名, SR 类型)，顺序与 CSV 一致
-#   key     : DUPLICATE KEY 的列（必须是 columns 的前缀，这里统一取前 1~2 列）
-#   buckets : 分桶数，按数据量给
-# ---------------------------------------------------------------------------
+# 目标表结构：columns 为 (列名, SR 类型) 且顺序与 CSV 一致；
+# key 须为 columns 前缀；buckets 按数据量设置
 SCHEMA = {
     # ---------------- DWS ----------------
     "dws.dws_product_daily": {
@@ -181,6 +162,23 @@ SCHEMA = {
             ("session_start_time", "DATETIME"), ("session_end_time", "DATETIME"),
         ],
     },
+    # ---------------- DWD（仅性能基准用，1.1 亿行）----------------
+    # event_date 置于首位：DUPLICATE KEY 须为列前缀，按日期排序可命中单天裁剪。
+    # 列顺序与 CSV 不同无妨，Stream Load 按列名映射；buckets=16 避免单桶过大。
+    "dwd.dwd_event_fact": {
+        "key": ["event_date"],
+        "buckets": 16,
+        "columns": [
+            ("event_date", "DATE"),
+            ("event_time", "DATETIME"),
+            ("event_type", "VARCHAR(32)"), ("behavior_type", "VARCHAR(16)"),
+            ("product_id", "BIGINT"), ("category_id", "BIGINT"),
+            ("category_code", "VARCHAR(128)"), ("brand", "VARCHAR(128)"),
+            ("price", "DOUBLE"), ("user_id", "BIGINT"),
+            ("user_session", "VARCHAR(128)"), ("is_purchase", "INT"),
+            ("event_hour", "INT"),
+        ],
+    },
 }
 
 # 保留字/易冲突的列名，建表时加反引号
@@ -263,14 +261,14 @@ def main():
         fq = f"{m['db']}.{m['table']}"
         spec = SCHEMA.get(fq)
         if spec is None:
-            print(f"  ⚠️  {fq}: SCHEMA 里没定义，跳过")
+            print(f"  WARN: {fq}: SCHEMA 里没定义，跳过")
             continue
 
         # columns 头必须按 CSV 的真实列序 —— manifest 里带着，比 SCHEMA 的建表顺序可靠
         csv_cols = m["columns"]
         schema_cols = [c for c, _ in spec["columns"]]
         if set(csv_cols) != set(schema_cols):
-            print(f"  ❌ {fq:<34s} 列名对不上：CSV={sorted(csv_cols)} vs SCHEMA={sorted(schema_cols)}")
+            print(f"  FAIL: {fq:<34s} 列名对不上：CSV={sorted(csv_cols)} vs SCHEMA={sorted(schema_cols)}")
             results.append({"table": fq, "hive": m["rows"], "sr": None, "ok": False,
                             "error": "列名集合不一致"})
             continue
@@ -290,23 +288,23 @@ def main():
                     cur.execute(f"SELECT COUNT(*) FROM `{m['db']}`.`{m['table']}`")
                     n_sr = cur.fetchone()[0]
                 ok = (n_sr == m["rows"])
-                print(f"  {'✅' if ok else '❌'} {fq:<34s} Hive {m['rows']:>12,d} "
+                print(f"  {'OK' if ok else 'FAIL'} {fq:<34s} Hive {m['rows']:>12,d} "
                       f"→ SR {n_sr:>12,d}  ({time.time()-t0:.0f}s)")
                 results.append({"table": fq, "hive": m["rows"], "sr": n_sr, "ok": ok})
             else:
                 msg = r.get("Message", "")[:200]
-                print(f"  ❌ {fq:<34s} {status}: {msg}")
+                print(f"  FAIL: {fq:<34s} {status}: {msg}")
                 results.append({"table": fq, "hive": m["rows"], "sr": None, "ok": False,
                                 "error": msg})
         except Exception as e:
-            print(f"  ❌ {fq:<34s} {type(e).__name__}: {str(e)[:160]}")
+            print(f"  FAIL: {fq:<34s} {type(e).__name__}: {str(e)[:160]}")
             results.append({"table": fq, "hive": m["rows"], "sr": None, "ok": False,
                             "error": str(e)[:200]})
     conn.close()
 
     ok = [r for r in results if r["ok"]]
     print()
-    print(f"✅ 完成 {len(ok)}/{len(results)} 张表")
+    print(f"OK: 完成 {len(ok)}/{len(results)} 张表")
     bad = [r for r in results if not r["ok"]]
     if bad:
         print("   失败：")

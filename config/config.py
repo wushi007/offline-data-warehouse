@@ -1,16 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 数仓统一配置
-============
+
 集中管理 HDFS 路径、源数据 Schema 与业务口径常量。
 
-口径对齐说明（重要）：
-    新表与 my_second_project 旧表口径对齐，可拼接使用（旧=2019-10，新=2019-11）。
-    - 分区/日期列统一为 event_date（Design Doc 中的 dt 在本实现中映射为 event_date）
-    - event_type 四类枚举：view / cart / remove_from_cart / purchase
-    - 衍生字段 behavior_type(中文) / is_purchase(0/1) / event_hour 与旧表完全一致
-    - 去重键沿用旧表 (user_id, event_time, product_id, event_type)
-    新 dwd_event_fact 为旧 dwd_ecom_behavior 的超集（额外保留 price/session/brand/category_code）。
+新表口径与 my_second_project 旧表对齐，可拼接使用（旧=2019-10，新=2019-11）：
+分区列统一 event_date；event_type 四类枚举 view/cart/remove_from_cart/purchase；
+去重键为 (user_id, event_time, product_id, event_type)。
 """
 
 import os
@@ -27,14 +23,14 @@ WAREHOUSE = f"{HDFS_ROOT}/home/lst/hadoop-data/warehouse"
 # 源数据（已上传 HDFS 的 2019-11 行为日志）
 SRC_CSV_2019NOV = f"{HDFS_ROOT}/home/lst/hadoop-data/eCommerce_behavior/2019-Nov.csv"
 
-# ODS / DWD
-ODS_PATH = f"{WAREHOUSE}/ods_event_log"            # 分区: event_date
-DWD_FACT_PATH = f"{WAREHOUSE}/dwd_event_fact"      # 分区: event_date
-DWD_DIRTY_PATH = f"{WAREHOUSE}/dwd_event_dirty"    # 分区: event_date
-DWD_FACT_INC_PATH = f"{WAREHOUSE}/dwd_ec_user_behavior_inc"  # 星型事实表（分区: event_date）
+# ODS / DWD（分区: event_date）
+ODS_PATH = f"{WAREHOUSE}/ods_event_log"
+DWD_FACT_PATH = f"{WAREHOUSE}/dwd_event_fact"
+DWD_DIRTY_PATH = f"{WAREHOUSE}/dwd_event_dirty"
+DWD_FACT_INC_PATH = f"{WAREHOUSE}/dwd_ec_user_behavior_inc"  # 星型事实表
 DWD_FACT_INC_PATH_ec= f"{WAREHOUSE}/dwd_ec_user_behavior_inc_ec"
 
-# 维度表路径（外部表 LOCATION；与统一口径维度定义一致）
+# 维度表路径（外部表 LOCATION）
 DIM_PRODUCT_SCD2_PATH = f"{WAREHOUSE}/dim/dim_product_scd2"
 DIM_CATEGORY_PATH     = f"{WAREHOUSE}/dim/dim_category"
 DIM_USER_PATH         = f"{WAREHOUSE}/dim/dim_user"
@@ -60,7 +56,6 @@ ADS = {
     "retention": f"{WAREHOUSE}/ads/ads_user_retention_daily",
 }
 
-# ---------------- Hive 库名（metastore 注册用） ----------------
 DBS = {
     "ods": "ods",
     "dwd": "dwd",
@@ -69,14 +64,11 @@ DBS = {
     "ads": "ads",
 }
 
-PARTITION_COL = "event_date"       # 全链路统一分区列（除 dim_product_scd2 / dim_* 为全量表、RFM 用 as_of_dt）
+PARTITION_COL = "event_date"       # 全链路统一分区列（dim_* 为全量表、RFM 用 as_of_dt）
 
-# ---------------- 数据区间（本次落地：2019-10 整月） ----------------
 DATA_START = "2019-10-01"
 DATA_END = "2019-10-31"
 
-# ---------------- DWD 落表口径 ----------------
-# dwd_event_fact 13 列 = 9 源字段 + behavior_type / is_purchase / event_hour + event_date 分区列
 FACT_COLUMNS = [
     "event_time", "event_type", "behavior_type", "product_id",
     "category_id", "category_code", "brand", "price",
@@ -85,8 +77,7 @@ FACT_COLUMNS = [
 DIRTY_REASON_COL = "dirty_reason"
 
 # ---------------- MySQL（ADS 落地，供报表/看板读取） ----------------
-# 连接信息一律从环境变量读取（参考项目根目录 .env.example），
-# 不要把真实口令写进代码后提交。
+# 连接信息从环境变量读取（见 .env.example），不要提交真实口令。
 MYSQL = {
     "host": os.environ.get("DW_MYSQL_HOST", "127.0.0.1"),
     "port": int(os.environ.get("DW_MYSQL_PORT", "3306")),
@@ -96,7 +87,6 @@ MYSQL = {
     "charset": os.environ.get("DW_MYSQL_CHARSET", "utf8mb4"),
 }
 
-# ---------------- 源数据 Schema（与旧 ODS 完全一致） ----------------
 SRC_SCHEMA = StructType([
     StructField("event_time", TimestampType(), True),
     StructField("event_type", StringType(), True),
@@ -109,10 +99,8 @@ SRC_SCHEMA = StructType([
     StructField("user_session", StringType(), True),
 ])
 
-# ---------------- 业务口径常量 ----------------
 VALID_EVENT_TYPES = ["view", "cart", "remove_from_cart", "purchase"]
 
-# 行为中文映射（与旧表 behavior_type 一致）
 BEHAVIOR_CN = {
     "view": "浏览",
     "cart": "加购",
@@ -120,13 +108,17 @@ BEHAVIOR_CN = {
     "purchase": "购买",
 }
 
-# DWD 去重键（沿用旧表口径）
 DEDUP_KEYS = ["user_id", "event_time", "product_id", "event_type"]
 
 # DQC 阈值
 DQC_DIRTY_RATIO_LIMIT = 0.02     # 脏数据比例阻断阈值 2%
 DQC_GMV_DAYS = 7                 # GMV 波动对比窗口
-DQC_GMV_VOLATILITY = 0.30        # GMV 相对 7 日均波动 >30% 阻断
+DQC_GMV_WARN = 0.30              # GMV 偏离近 7 日中位数 30% 告警（上涨、下跌都告警）
+DQC_GMV_DROP_BLOCK = 0.50        # 低于基线 50% 阻断（仅下跌）
+# 涨跌不对称：下跌多为漏数需阻断，上涨多为真实高峰，仅告警。
 DQC_ROWS_7D_DAYS = 7
-DQC_ROWS_WARN = 0.50             # 行数波动 50% 告警
-DQC_ROWS_BLOCK = 0.80            # 行数波动 80% 阻断
+DQC_ROWS_WARN = 0.50             # 行数偏离近 7 日中位数 50% 告警（上涨、下跌都告警）
+DQC_ROWS_DROP_BLOCK = 0.50       # 低于基线 50% 阻断（仅下跌）
+# 同样只拦下跌：上涨疑似重复导入，由 DWD 去重键兜底。
+DQC_NULL_MAX_RATE = 0.001        # 单字段空值率上限 0.1%（超出即阻断）
+# 留 0.1% 容差，避免个别空值拦掉整天，整列缺失仍可拦截。

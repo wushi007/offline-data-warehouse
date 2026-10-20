@@ -2,18 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 ddl.py — 数仓全链路建表（ODS / DWD / DIM / DWS / ADS）
-========================================================
-只做两件事：**建库表** + **注册已有分区**，不写数据（数据由各 build_*.py 落）。
 
-设计约定（与仓库既有口径一致）：
-  · 分区列统一 `event_date`（DATE），无 hour 层——ODS 按天落盘，重跑只覆盖当天
-  · event_type 四类枚举 view/cart/remove_from_cart/purchase（不丢 remove_from_cart）
-  · 全部为 **Hive 外部表 + LOCATION 指到 HDFS**：DROP 表不删文件，便于重建
-  · 存储格式 PARQUET + SNAPPY，与 ODS / StarRocks 灌入链路一致
+只建库表与注册分区，不写数据。全部为 Hive 外部表，DROP 不删 HDFS 文件；
+分区列统一 event_date，RFM 快照用 as_of_dt。
 
-用法：
-  python etl/ddl.py             # 建全部库表 + MSCK 注册 ODS 分区
-  python etl/ddl.py --drop      # 先删表再建（外部表，HDFS 文件保留）
+用法：python etl/ddl.py [--drop]
 """
 
 import argparse
@@ -34,7 +27,6 @@ def ddl_statements():
     """返回 [(库名, 表名, DDL)]，顺序即依赖顺序。"""
     stmts = []
 
-    # ---------------- ODS ----------------
     stmts.append(("ods", "ods_event_log", f"""
         CREATE EXTERNAL TABLE IF NOT EXISTS {DBS['ods']}.ods_event_log (
             event_time    TIMESTAMP COMMENT '事件发生时间(UTC)',
@@ -53,8 +45,6 @@ def ddl_statements():
         LOCATION '{ODS_PATH}'
     """))
 
-    # ---------------- DWD ----------------
-    # 事实表 13 列：9 源字段 + behavior_type/is_purchase/event_hour + event_date 分区列
     stmts.append(("dwd", "dwd_event_fact", f"""
         CREATE EXTERNAL TABLE IF NOT EXISTS {DBS['dwd']}.dwd_event_fact (
             event_time    TIMESTAMP COMMENT '事件发生时间(UTC)',
@@ -95,7 +85,6 @@ def ddl_statements():
         LOCATION '{DWD_DIRTY_PATH}'
     """))
 
-    # ---------------- DIM ----------------
     stmts.append(("dim", "dim_product_scd2", f"""
         CREATE EXTERNAL TABLE IF NOT EXISTS {DBS['dim']}.dim_product_scd2 (
             dim_product_sk BIGINT COMMENT '代理键（版本粒度，非业务键）',
@@ -166,7 +155,6 @@ def ddl_statements():
         LOCATION '{DIM_SESSION_PATH}'
     """))
 
-    # ---------------- DWS ----------------
     stmts.append(("dws", "dws_user_session_daily", f"""
         CREATE EXTERNAL TABLE IF NOT EXISTS {DBS['dws']}.dws_user_session_daily (
             user_id              BIGINT COMMENT '用户ID',
@@ -232,7 +220,6 @@ def ddl_statements():
         LOCATION '{DWS['traffic_hour']}'
     """))
 
-    # ---------------- ADS ----------------
     stmts.append(("ads", "ads_trade_daily", f"""
         CREATE EXTERNAL TABLE IF NOT EXISTS {DBS['ads']}.ads_trade_daily (
             gmv             DOUBLE COMMENT '销售额=SUM(purchase_amount)',
@@ -327,7 +314,6 @@ def ddl_statements():
         LOCATION '{ADS['retention']}'
     """))
 
-    # RFM 为全量快照，分区列用 as_of_dt（快照日）
     stmts.append(("ads", "ads_user_rfm_snapshot", f"""
         CREATE EXTERNAL TABLE IF NOT EXISTS {DBS['ads']}.ads_user_rfm_snapshot (
             user_id   BIGINT COMMENT '用户ID（主键）',
@@ -348,7 +334,7 @@ def ddl_statements():
 def create_databases(spark):
     for db in DBS.values():
         spark.sql(f"CREATE DATABASE IF NOT EXISTS {db}")
-    print(f"✅ 建库完成：{', '.join(DBS.values())}")
+    print(f"OK: 建库完成：{', '.join(DBS.values())}")
 
 
 def create_all(spark, drop=False, drop_tables=None):
@@ -360,13 +346,13 @@ def create_all(spark, drop=False, drop_tables=None):
             spark.sql(f"DROP TABLE IF EXISTS {db}.{tbl}")
         spark.sql(ddl)
         print(f"  建表 {db}.{tbl}")
-    print(f"✅ 建表完成")
+    print(f"OK: 建表完成")
 
 
 def repair_partitions(spark):
     """MSCK REPAIR：把 HDFS 上已存在的分区目录登记进 metastore（外部表重建后必需）。"""
     spark.sql(f"MSCK REPAIR TABLE {DBS['ods']}.ods_event_log")
-    print("✅ ods_event_log 分区已注册")
+    print("OK: ods_event_log 分区已注册")
 
 
 def main():

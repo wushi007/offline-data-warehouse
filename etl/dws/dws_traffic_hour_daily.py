@@ -2,14 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 dws.dws_traffic_hour_daily — 日 × 小时 分时流量汇总
-====================================================
-粒度：event_date + event_hour
-口径：分时分析唯一入口（明细 1.37M 行/天 压到 24 行/天）。
-幂等：静态分区 INSERT OVERWRITE，重跑只覆盖当天分区。
-
-用法：
-  python etl/dws/dws_traffic_hour_daily.py --dt 2019-10-01
-  python etl/dws/dws_traffic_hour_daily.py --start 2019-10-01 --end 2019-10-31
+粒度 event_date + event_hour，分时分析唯一入口；pv 为行为条数，其余为去重计数；静态分区覆盖写，重跑幂等。
+用法：python etl/dws/dws_traffic_hour_daily.py --dt 2019-10-01，或 --start/--end 指定区间。
 """
 
 import argparse
@@ -66,7 +60,7 @@ def main():
     print(f"📊 {TABLE} 汇总 {len(days)} 天：{days[0]} ~ {days[-1]}")
     for d in days:
         build(spark, d)
-    print("✅ 完成")
+    print("OK: 完成")
     spark.stop()
 
 

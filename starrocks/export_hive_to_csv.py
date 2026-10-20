@@ -1,27 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-export_hive_to_csv.py —— 把 Hive 里已有的数仓表导出为 CSV，供 StarRocks Stream Load 灌入
-======================================================================================
-设计前提：**不重算**。只读取 Spark 已经跑出来的结果（DWS / ADS / DIM 的现有分区），
-原样搬到 StarRocks，行数与内容应与 Hive 侧完全一致。
-
-为什么先导出成 CSV 再灌，而不是让 StarRocks 直连 Hive：
-  · 本机 16G 内存、WSL2 只分到 7.6G，StarRocks 容器 + Spark 驱动同时跑必 OOM
-  · 拆成「导出 → 起容器 → 灌数据」两步，两个重活**串行**执行，内存互不挤占
-  · Stream Load 是 StarRocks 原生的批量导入通道（走 BE 8040），比 JDBC 逐行插快几个量级
-
-CSV 格式约定（必须与 Stream Load 的解析参数对得上，见 load_to_starrocks.sh）：
-  · 无表头            —— 列名由 Stream Load 的 columns 参数显式指定
-  · 字段分隔 ','      —— 与 Stream Load 的 column_separator 一致
-  · NULL 写成 \\N     —— StarRocks 默认 NULL 标记，避免空字符串被当成空值
-  · timestamp 写成 'yyyy-MM-dd HH:mm:ss' —— Spark 默认 ISO 格式带 T 和时区，StarRocks 解析不了
-  · 每表一个文件（coalesce(1)），方便一次 PUT 灌完
-
-用法：
-  python starrocks/export_hive_to_csv.py                      # 导出全部 16 张表
-  python starrocks/export_hive_to_csv.py --tables dws.dws_traffic_hour_daily
-  python starrocks/export_hive_to_csv.py --out /tmp/sr_export # 换输出目录
+export_hive_to_csv.py — 把 Hive 数仓表导出为 CSV，供 StarRocks Stream Load 灌入
+只读 Spark 已有结果，不重算；行数与内容应与 Hive 侧一致。
+CSV: 无表头 / 逗号分隔 / NULL 为 \\N / timestamp=yyyy-MM-dd HH:mm:ss，需与加载参数一致。
+用法: python starrocks/export_hive_to_csv.py [--tables db.table ...] [--out DIR]
 """
 
 import argparse
@@ -35,10 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from etl.utils import get_spark  # noqa: E402
 
-# ---------------------------------------------------------------------------
-# 待导出的表：db.table -> (分区列名 or None)
-# 顺序按「先小后大」，这样即使中途出问题，也已经把最有价值的汇总表落盘了。
-# ---------------------------------------------------------------------------
+# 待导出表：db.table -> 分区列名（None 为全量表），按先小后大排列
 TABLES = [
     # ---- ADS：小表，行数几十到几百 ----
     ("ads.ads_trade_daily",             "event_date"),
@@ -59,6 +39,9 @@ TABLES = [
     ("dim.dim_product_scd2",            None),
     ("dim.dim_user",                    None),
     ("dim.dim_session",                 None),
+    # ---- DWD：最大的一张，放最后（1.1 亿行）----
+    # coalesce(1) 单文件约 15GB，导出耗时最长
+    ("dwd.dwd_event_fact",              "event_date"),
 ]
 
 CSV_OPTS = {
@@ -93,10 +76,7 @@ def export_one(spark, table, part_col, out_dir):
     if final.exists():
         final.unlink()
 
-    # ★ 必须写成 file:// 的绝对 URI。
-    #   get_spark() 里设了 spark.hadoop.fs.defaultFS=hdfs://...，裸的本机路径
-    #   （如 /home/lst/sr_export/...）会被当成 HDFS 路径，文件写进 HDFS 而不是本地磁盘，
-    #   后面 Stream Load 自然找不到。用 as_uri() 显式指定 scheme 才安全。
+    # 必须写 file:// 绝对 URI：defaultFS 为 HDFS，裸路径会被当作 HDFS 路径写入
     df.coalesce(1).write.mode("overwrite").options(**CSV_OPTS).csv(tmp.resolve().as_uri())
 
     # Spark 写出的是 part-xxxxx-<uuid>.csv，挪成稳定的 <表名>.csv
@@ -148,9 +128,9 @@ def main():
             m = export_one(spark, table, part_col, out_dir)
             manifest.append(m)
             mb = m["bytes"] / 1024 / 1024
-            print(f"  ✅ {table:<34s} {m['rows']:>12,d} 行   {mb:>8.1f} MB")
+            print(f"  OK: {table:<34s} {m['rows']:>12,d} 行   {mb:>8.1f} MB")
         except Exception as e:
-            print(f"  ❌ {table:<34s} {type(e).__name__}: {e}")
+            print(f"  FAIL: {table:<34s} {type(e).__name__}: {e}")
             manifest.append({"db": table.split(".")[0], "table": table.split(".")[1],
                              "partition_col": part_col, "error": str(e)})
     spark.stop()
@@ -160,7 +140,7 @@ def main():
 
     ok = [m for m in manifest if "rows" in m]
     print()
-    print(f"✅ 完成：{len(ok)}/{len(todo)} 张表，共 {sum(m['rows'] for m in ok):,} 行")
+    print(f"OK: 完成：{len(ok)}/{len(todo)} 张表，共 {sum(m['rows'] for m in ok):,} 行")
     print(f"   清单：{mf}")
 
 

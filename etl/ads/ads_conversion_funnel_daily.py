@@ -2,16 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 ads.ads_conversion_funnel_daily — 转化漏斗日报
-==============================================
-来源 dwd_event_fact（**回 DWD 而非用 DWS**：漏斗 UV 必须跨商品精确去重，
-不能拿商品级 UV 累加）；粒度：每天 1 行。
-
-口径提醒：cart_to_purchase_rate 可能 >100%——用户可直接下单绕过加购，
-属真实业务特征，不做截断。因此漏斗不变量用 `view_uv >= cart_uv 且 >= purchase_uv`。
-
-用法：
-  python etl/ads/ads_conversion_funnel_daily.py --dt 2019-10-01
-  python etl/ads/ads_conversion_funnel_daily.py --start 2019-10-01 --end 2019-10-31
+来源 dwd_event_fact；粒度每天 1 行；漏斗 UV 需跨商品去重，不能累加商品级 UV。
+cart_to_purchase_rate 可超 100%（用户可直接下单），不截断。
+用法：python etl/ads/ads_conversion_funnel_daily.py --dt 2019-10-01，或 --start/--end 指定区间。
 """
 
 import argparse
@@ -47,7 +40,7 @@ SQL = f"""
 def build(spark, dt):
     spark.sql(SQL.format(dt=dt))
     f = spark.sql(f"SELECT * FROM {TABLE} WHERE {P}='{dt}'").collect()[0]
-    inv = "✅" if f["view_uv"] >= f["cart_uv"] and f["view_uv"] >= f["purchase_uv"] else "❌"
+    inv = "OK" if f["view_uv"] >= f["cart_uv"] and f["view_uv"] >= f["purchase_uv"] else "FAIL"
     print(f"  [{dt}] {TABLE} 漏斗 UV {f['view_uv']:,}→{f['cart_uv']:,}→{f['purchase_uv']:,} {inv}"
           f" | 浏览→加购 {f['view_to_cart_rate'] * 100:.2f}%"
           f" / 浏览→购买 {f['view_to_purchase_rate'] * 100:.2f}%"
@@ -68,7 +61,7 @@ def main():
     print(f"📈 {TABLE} {len(days)} 天：{days[0]} ~ {days[-1]}")
     for d in days:
         build(spark, d)
-    print("✅ 完成")
+    print("OK: 完成")
     spark.stop()
 
 

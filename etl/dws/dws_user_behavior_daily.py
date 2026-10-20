@@ -2,14 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 dws.dws_user_behavior_daily — 日 × 用户 行为汇总
-=================================================
-粒度：event_date + user_id（DAU / RFM 的基础）
-口径：purchase_* 只统计 purchase 行为；purchase_amount 为当日购买金额。
-幂等：静态分区 INSERT OVERWRITE，重跑只覆盖当天分区。
-
-用法：
-  python etl/dws/dws_user_behavior_daily.py --dt 2019-10-01
-  python etl/dws/dws_user_behavior_daily.py --start 2019-10-01 --end 2019-10-31
+粒度 event_date + user_id（DAU / RFM 的基础）；purchase_* 只统计 purchase 行为；静态分区覆盖写，重跑幂等。
+用法：python etl/dws/dws_user_behavior_daily.py --dt 2019-10-01，或 --start/--end 指定区间。
 """
 
 import argparse
@@ -62,7 +56,7 @@ def main():
     print(f"📊 {TABLE} 汇总 {len(days)} 天：{days[0]} ~ {days[-1]}")
     for d in days:
         build(spark, d)
-    print("✅ 完成")
+    print("OK: 完成")
     spark.stop()
 
 
