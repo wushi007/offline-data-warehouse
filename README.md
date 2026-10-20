@@ -1,11 +1,11 @@
 # 电商离线数仓（Spark + Hive + Airflow）
 
 基于 [Kaggle eCommerce behavior](https://www.kaggle.com/datasets/mkechinov/ecommerce-behavior-data-from-multi-category-store)
-数据集（2019-Oct / 2019-Nov，约 4,700 万行行为日志）构建的离线数仓，覆盖 ODS → DWD → DIM → DWS → ADS 五层。
-31 天数据全链路跑通，并通过跨层对账。
+数据集（2019-Oct / 2019-Nov，61 天共约 1.1 亿行行为日志）构建的离线数仓，覆盖 ODS → DWD → DIM → DWS → ADS 五层。
+2019-10 的 31 天完成全链路跑通与跨层对账（DWD 4,241 万行；ODS 4,700 万行含 11-01~03 三个分区）；2019-11 数据用于增量与性能基准，全量 DWD 为 109,806,507 行 / 61 分区。
 
 > 运行环境：16 GB 内存 / 1 TB 硬盘的 Windows 笔记本，WSL2 + Ubuntu 22.04，
-> 单机跑完 4,700 万行行为日志。
+> 单机完成 1.1 亿行源数据的导入与 DWD 构建，其中 31 天跑通 ODS→ADS 全链路。
 >
 > 本项目是 Spark SQL 数仓 Demo，环境配置不是通用方案，仅供思路参考。
 > 所有内存与并发参数都按「这台机器只有 16 GB 内存」这一前提调整，处于单机 Spark 演示的范围内。
