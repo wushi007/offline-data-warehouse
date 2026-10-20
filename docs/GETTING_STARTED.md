@@ -23,7 +23,7 @@
 
 ## 一、环境要求
 
-验证环境为一台 16 GB 内存、1 TB 硬盘的 Windows 笔记本，WSL2 + Ubuntu 22.04，单机完成 4,700 万行行为日志的处理。
+验证环境为一台 16 GB 内存、1 TB 硬盘的 Windows 笔记本，WSL2 + Ubuntu 22.04。单机完成 1.1 亿行源数据的 DWD 构建，其中 2019-10 的 31 天跑通 ODS→ADS 全链路。
 
 | 组件 | 本项目验证过的版本 | 说明 |
 |---|---|---|
@@ -133,7 +133,7 @@ ss -ltn | grep -E ':(8020|9870|3307)'    # 8020 NameNode / 9870 WebUI / 3307 MyS
 ## 四、准备源数据
 
 数据来自 Kaggle [eCommerce Behavior Data](https://www.kaggle.com/datasets/mkechinov/ecommerce-behavior-data-from-multi-category-store)：
-`2019-Oct.csv`（约 4,200 万行）与 `2019-Nov.csv`。
+`2019-Oct.csv`（约 4,200 万行）与 `2019-Nov.csv`（约 6,700 万行），合计约 1.1 亿行。
 
 ### 1. 上传到 HDFS
 
