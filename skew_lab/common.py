@@ -7,6 +7,7 @@ SparkListenerTaskEnd（自包含，无需 History Server）。
 """
 
 import json
+import os
 import shutil
 import statistics
 import sys
@@ -26,11 +27,12 @@ TAIL_MIN, TAIL_SPAN = 1000000, 400000
 DEFAULT_ROWS = 20_000_000
 
 
-def make_spark(app_name, memory="3g", shuffle_partitions=200, extra=None):
+def make_spark(app_name, memory=None, shuffle_partitions=200, extra=None):
     """建会话并开启事件日志（事件日志是后面拿 task 指标的唯一途径）。"""
+    memory = memory or os.environ.get("SPARK_DRIVER_MEMORY", "3g")
     Path(EVENT_LOG_DIR).mkdir(parents=True, exist_ok=True)
     b = (SparkSession.builder
-         .master("local[6]")
+         .master(os.environ.get("SPARK_MASTER", "local[6]"))
          .appName(app_name)
          .config("spark.driver.memory", memory)
          .config("spark.hadoop.fs.defaultFS", "hdfs://localhost:8020")

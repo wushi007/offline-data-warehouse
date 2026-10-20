@@ -9,17 +9,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config.config import HDFS_ROOT  # noqa: E402
 
 
-def get_spark(app_name="WarehouseTask", memory="4g", shuffle_partitions=100):
-    """创建统一配置的 SparkSession（Kryo + AQE + Snappy）。
-    master 由 SPARK_MASTER 覆盖（默认 local[6]）；builder.master() 会覆盖
-    spark-submit 的 --master，故需在代码内读取。
+def get_spark(app_name="WarehouseTask", memory=None, shuffle_partitions=100):
+    """创建 SparkSession，默认连 standalone 集群（spark://localhost:7077）。
+
+    可用环境变量覆盖：SPARK_MASTER / SPARK_DRIVER_MEMORY /
+    SPARK_EXECUTOR_MEMORY / SPARK_EXECUTOR_CORES / SPARK_EXECUTOR_INSTANCES。
+    切回本地模式：SPARK_MASTER=local[6]。
     """
+    memory = memory or os.environ.get("SPARK_DRIVER_MEMORY", "1g")
     from pyspark.sql import SparkSession
     return (
         SparkSession.builder
-        .master(os.environ.get("SPARK_MASTER", "local[6]"))
+        .master(os.environ.get("SPARK_MASTER", "spark://localhost:7077"))
         .appName(app_name)
         .config("spark.driver.memory", memory)
+        .config("spark.executor.memory", os.environ.get("SPARK_EXECUTOR_MEMORY", "1g"))
+        .config("spark.executor.cores", os.environ.get("SPARK_EXECUTOR_CORES", "2"))
+        .config("spark.executor.instances", os.environ.get("SPARK_EXECUTOR_INSTANCES", "4"))
         .config("spark.hadoop.fs.defaultFS", HDFS_ROOT)
         .config("spark.sql.adaptive.enabled", "true")
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true")

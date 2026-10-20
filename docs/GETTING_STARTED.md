@@ -42,12 +42,13 @@
 
 ### 内存说明（WSL2 用户尤其注意）
 
-宿主内存 16 GB，WSL2 默认向虚拟机分配约一半物理内存（未调优 `/etc/wsl.conf` 时实测可见 7.6 GB）。扣除常驻的 HDFS、MySQL、Airflow（约 2.5 GB），Spark 可用余量为 4~5 GB。由此确定三项约束：
+宿主内存 16 GB，WSL2 默认向虚拟机分配约一半物理内存（未调优 `/etc/wsl.conf` 时实测可见 7.6 GB）。扣除常驻的 HDFS、MySQL、Airflow（约 2.5 GB），Spark 可用余量为 4~5 GB。由此确定以下约束：
 
 | 约束 | 取值 | 原因 |
 |---|---|---|
-| driver 内存 | `3g` | 按机器可用内存设置。设为 `6g` 时 JVM 会被内核 OOM killer 终止（`dmesg` 可见 `Out of memory: Killed process (java)`） |
-| 同一时刻一个 SparkSession | `etl/run_locked.sh` 的 `flock` 闸门 | 两个会话并存会 OOM |
+| driver 内存 | `1g`（`SPARK_DRIVER_MEMORY`） | standalone 的 driver 在客户端进程内，按可用内存设置 |
+| executor | `4 × 1g × 2 核`（`SPARK_EXECUTOR_*`） | Worker 8 核 / 4g，并行度 8 |
+| 同一时刻一个 SparkSession | `etl/run_locked.sh` 的 `flock` 闸门 | 两个作业并存会 OOM |
 | 调度并发 = 1 | `max_active_tasks=1` + `max_active_runs=1` | 与闸门共同保证串行 |
 
 > 路径（如 `/home/lst/hadoop-data/warehouse`）集中在 `config/config.py`，换机器时修改该文件即可。内存相关取值可按新机器的可用内存调整。
@@ -127,6 +128,18 @@ curl -s localhost:9870 | head -3
 ```bash
 ss -ltn | grep -E ':(8020|9870|3307)'    # 8020 NameNode / 9870 WebUI / 3307 MySQL
 ```
+
+### 手动启动 Spark standalone
+
+```bash
+cp conf/spark-env.sh.example $SPARK_HOME/conf/spark-env.sh   # 首次，按本机路径调整
+$SPARK_HOME/sbin/start-master.sh
+$SPARK_HOME/sbin/start-worker.sh spark://localhost:7077
+jps                                                          # 应看到 Master / Worker
+ss -ltn | grep -E ':(7077|8081)'                             # Master / Worker WebUI
+```
+
+默认连 `spark://localhost:7077`。切本地模式：`SPARK_MASTER=local[6]`。
 
 ---
 
@@ -615,7 +628,7 @@ if keep_dir:
 dmesg | grep -iE "oom-kill|Killed process"
 ```
 
-解法：降低 driver 内存（`get_spark(memory="3g")`）；批量任务按层拆分，各起独立进程；使用 `--skip-existing` 断点续跑。
+解法：降低 driver 内存（`SPARK_DRIVER_MEMORY=1g`）或减少 executor 数；批量任务按层拆分，各起独立进程；使用 `--skip-existing` 断点续跑。
 
 ### Q5：重跑同一天，结果和上次不一样（会话数、类目快照漂移）
 

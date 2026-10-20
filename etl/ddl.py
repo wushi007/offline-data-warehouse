@@ -361,7 +361,7 @@ def main():
     ap.add_argument("--drop-tables", default="", help="只重建指定表，逗号分隔，如 dim.dim_user")
     args = ap.parse_args()
 
-    spark = get_spark("DDL", memory="2g")
+    spark = get_spark("DDL")
     spark.sparkContext.setLogLevel("ERROR")
     targets = [t.strip() for t in args.drop_tables.split(",") if t.strip()]
     create_all(spark, drop=args.drop, drop_tables=targets)

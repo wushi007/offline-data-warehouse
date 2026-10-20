@@ -27,6 +27,12 @@ HADOOP_CONF_DIR="${HADOOP_CONF_DIR:-$HADOOP_HOME/etc/hadoop}"
 VENV_PYTHON="${VENV_PYTHON:-$REPO_ROOT/.venv/bin/python}"
 DATA_START="${DATA_START:-2019-10-01}"
 DATA_END="${DATA_END:-2019-11-30}"
+# Spark standalone（本机 master:7077）；切本地模式设 SPARK_MASTER=local[6]
+SPARK_MASTER="${SPARK_MASTER:-spark://localhost:7077}"
+SPARK_DRIVER_MEMORY="${SPARK_DRIVER_MEMORY:-1g}"
+SPARK_EXECUTOR_MEMORY="${SPARK_EXECUTOR_MEMORY:-1g}"
+SPARK_EXECUTOR_CORES="${SPARK_EXECUTOR_CORES:-2}"
+SPARK_EXECUTOR_INSTANCES="${SPARK_EXECUTOR_INSTANCES:-4}"
 
 AIRFLOW_DB_USER="${AIRFLOW_DB_USER:-airflow}"
 AIRFLOW_DB_PASS="${AIRFLOW_DB_PASS:-}"
@@ -62,7 +68,12 @@ gen_variable() {
     "hadoop_home":     "$HADOOP_HOME",
     "hadoop_conf_dir": "$HADOOP_CONF_DIR",
     "data_start":      "$DATA_START",
-    "data_end":        "$DATA_END"
+    "data_end":        "$DATA_END",
+    "spark_master":    "$SPARK_MASTER",
+    "spark_driver_memory": "$SPARK_DRIVER_MEMORY",
+    "spark_executor_memory": "$SPARK_EXECUTOR_MEMORY",
+    "spark_executor_cores": "$SPARK_EXECUTOR_CORES",
+    "spark_executor_instances": "$SPARK_EXECUTOR_INSTANCES"
   }
 }
 JSON
