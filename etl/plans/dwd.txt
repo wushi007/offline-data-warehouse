@@ -1,0 +1,6 @@
+# DWD 层：事实表 → 脏数据隔离 → 质量闸门
+# dqc 必须最后：它要校验事实表与脏表两边行数（账对平）
+# 用法：./run.sh inject --plan etl/plans/dwd.txt --dt 2019-11-01 --fail-fast
+etl/dwd/dwd_event_fact.py        --dt {dt}
+etl/dwd/dwd_event_dirty.py       --dt {dt}
+etl/dwd/dwd_event_fact_dqc.py    --dt {dt}

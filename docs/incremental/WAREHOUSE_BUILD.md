@@ -53,7 +53,7 @@ ODS(物理分区) → DWD 清洗 → DWS 汇总(4表) → ADS 应用(7表)
 
 源数据没有商品主数据表，商品属性只能从事实表反推。算法（`etl/dim/dim_product_scd2.py::SCD2_SQL`）：
 
-1. 日主导组合：每天每商品取当日出现次数最多的 `(category_id, category_code, brand)`，同票数按 `category_id` 兜底排序，结果确定。用于消除单日噪声；实测日粒度下单个商品一天最多出现 3 种属性组合。
+1. 日主导组合：每天每商品取当日出现次数最多的 `(category_id, category_code, brand)`，同票数按 `category_id → category_code → brand` 依次兜底排序，结果确定。用于消除单日噪声；实测日粒度下单个商品一天最多出现 3 种属性组合。
 2. 变更打点：按 `product_id` 按天排序，用 `LAG` 比对组合是否变化，变化则版本号 +1。
 3. 折叠区间：同版本的连续日期折叠为 `[dw_start_date, last_seen]`。
 4. 开链 / 闭链：
@@ -164,7 +164,7 @@ RFM：347,118 购买用户中，重要价值客户占 12.2%，贡献 55.6% 的 G
 ```bash
 cd /path/to/ecom-warehouse
 
-./run.sh ddl                                   # 建 5 库 19 表 + MSCK 注册 ODS 分区
+./run.sh ddl                                   # 建 5 库 19 表 + MSCK 注册全部分区表（RFM 除外）
 ./run.sh build --start 2019-10-01 --end 2019-10-31   # 全链路（DWD→DWS→DIM→ADS + 对账）
 ./run.sh build --dt 2019-11-01                 # 单日增量（DIM 走增量）
 ./run.sh build --only dwd,dws                  # 只跑指定层

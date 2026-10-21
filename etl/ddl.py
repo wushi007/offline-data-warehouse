@@ -108,7 +108,7 @@ def ddl_statements():
             `month`      INT  COMMENT '月',
             `day`        INT  COMMENT '日',
             week_of_year INT  COMMENT '当年第几周',
-            day_of_week  INT  COMMENT '周几（1=周一）',
+            day_of_week  INT  COMMENT '周几（Spark DAYOFWEEK：1=周日 … 7=周六）',
             is_workday   INT  COMMENT '是否工作日 1/0'
         )
         COMMENT 'DIM层-日期维度表'
@@ -349,10 +349,26 @@ def create_all(spark, drop=False, drop_tables=None):
     print(f"OK: 建表完成")
 
 
-def repair_partitions(spark):
-    """MSCK REPAIR：把 HDFS 上已存在的分区目录登记进 metastore（外部表重建后必需）。"""
-    spark.sql(f"MSCK REPAIR TABLE {DBS['ods']}.ods_event_log")
-    print("OK: ods_event_log 分区已注册")
+# RFM 快照由脚本自己维护分区：MSCK 会把历史 as_of_dt 目录全部注册回来
+SKIP_MSCK = {("ads", "ads_user_rfm_snapshot")}
+
+
+def repair_partitions(spark, stmts):
+    """MSCK REPAIR 所有分区表：外部表 DROP/CREATE 不删文件，旧分区必须重新登记。"""
+    count = 0
+    for db, tbl, ddl in stmts:
+        if "PARTITIONED BY" not in ddl.upper():
+            continue
+        if (db, tbl) in SKIP_MSCK:
+            print(f"  (跳过) {db}.{tbl}：快照表由脚本自行维护分区")
+            continue
+        try:
+            spark.sql(f"MSCK REPAIR TABLE {db}.{tbl}")
+            count += 1
+            print(f"  MSCK REPAIR {db}.{tbl}")
+        except Exception as e:  # noqa: BLE001 - 单表失败不阻断其余表
+            print(f"  WARN: MSCK {db}.{tbl} 失败：{str(e)[:100]}")
+    print(f"OK: 分区已注册（{count} 张分区表）")
 
 
 def main():
@@ -364,16 +380,10 @@ def main():
     spark = get_spark("DDL")
     spark.sparkContext.setLogLevel("ERROR")
     targets = [t.strip() for t in args.drop_tables.split(",") if t.strip()]
+    stmts = ddl_statements()
     create_all(spark, drop=args.drop, drop_tables=targets)
-    repair_partitions(spark)
-    # 分区表重建后旧分区目录要重新登记（外部表 DROP 不删文件，新表只认得本次 INSERT 的分区）
-    for db, tbl, _ in ddl_statements():
-        if f"{db}.{tbl}" in targets and tbl != "ods_event_log":
-            try:
-                spark.sql(f"MSCK REPAIR TABLE {db}.{tbl}")
-                print(f"  MSCK REPAIR {db}.{tbl}")
-            except Exception:  # 非分区表会报错，忽略
-                pass
+    # 外部表 DROP/CREATE 不删文件；重建后把 HDFS 上已有分区统一登记回 metastore
+    repair_partitions(spark, stmts)
 
     for db in DBS.values():
         try:

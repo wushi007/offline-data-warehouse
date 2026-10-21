@@ -1,0 +1,4 @@
+# ODS 层：导入 → 质量闸门
+# 用法：./run.sh inject --plan etl/plans/ods.txt --dt 2019-11-01 --fail-fast
+etl/ods/ods_event_log.py      --dt {dt}
+etl/ods/ods_event_log_dqc.py  --dt {dt}

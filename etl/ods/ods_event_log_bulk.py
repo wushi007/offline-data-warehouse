@@ -25,7 +25,7 @@ TABLE = f"{DBS['ods']}.ods_event_log"
 def import_csv(spark, csv_path: str):
     from pyspark.sql import functions as F
 
-    print(f"📥 读取源 CSV：{csv_path}")
+    print(f"读取源 CSV：{csv_path}")
     raw = spark.read.csv(csv_path, schema=SRC_SCHEMA,
                          header=True, sep=",", timestampFormat="yyyy-MM-dd HH:mm:ss z")
 

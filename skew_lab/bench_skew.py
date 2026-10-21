@@ -161,7 +161,7 @@ def main():
 
     print_result(result)
     append_json(OUT, result)
-    print(f"\n📄 已追加到 {OUT}")
+    print(f"\n已追加到 {OUT}")
 
 
 if __name__ == "__main__":

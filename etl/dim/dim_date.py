@@ -38,11 +38,20 @@ def rebuild(spark):
     return n
 
 
+def ensure(spark):
+    """静态维表：为空才生成，已存在则跳过（日调度不重复写）。"""
+    n = spark.sql(f"SELECT COUNT(*) AS c FROM {TABLE}").collect()[0]["c"]
+    if n:
+        print(f"  dim_date 已存在（{n} 天），跳过")
+        return n
+    return rebuild(spark)
+
+
 def main():
     argparse.ArgumentParser().parse_args()
     spark = get_spark("Dim_Date")
     spark.sparkContext.setLogLevel("ERROR")
-    print(f"🏗  {TABLE} 生成")
+    print(f"{TABLE} 生成")
     rebuild(spark)
     print("OK: 完成")
     spark.stop()

@@ -102,10 +102,10 @@ def main():
     spark = get_spark("Dim_User")
     spark.sparkContext.setLogLevel("ERROR")
     if args.dt:
-        print(f"🏗  {TABLE} 增量 {args.dt}")
+        print(f"{TABLE} 增量 {args.dt}")
         build_inc(spark, args.dt)
     else:
-        print(f"🏗  {TABLE} 全量重建")
+        print(f"{TABLE} 全量重建")
         rebuild(spark)
     print("OK: 完成")
     spark.stop()

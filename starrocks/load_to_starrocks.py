@@ -249,7 +249,7 @@ def main():
     if args.only:
         items = [m for m in items if m["table"] in args.only]
 
-    print(f"📥 待灌入 {len(items)} 张表（manifest: {args.manifest}）")
+    print(f"待灌入 {len(items)} 张表（manifest: {args.manifest}）")
     if args.dry_run:
         for m in items:
             print(f"   {m['db']}.{m['table']:<30s} {m['rows']:>12,d} 行")
