@@ -13,8 +13,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from config.config import DBS, PARTITION_COL  # noqa: E402
-from etl.utils import get_spark  # noqa: E402
+from config.config import ADS, DBS, PARTITION_COL  # noqa: E402
+from etl.utils import drop_path, get_spark  # noqa: E402
 
 TABLE = f"{DBS['ads']}.ads_user_rfm_snapshot"
 FACT = f"{DBS['dwd']}.dwd_event_fact"
@@ -57,16 +57,22 @@ SQL = f"""
 
 
 def drop_all_partitions(spark):
-    """注销本表全部已注册分区（含幽灵分区）；外部表须用 DROP PARTITION 同步元数据。"""
+    """注销本表全部已注册分区。
+
+    外部表 DROP PARTITION 只删元数据、不删 HDFS 文件；旧快照目录会一直留在
+    LOCATION 下，DDL/MSCK 重新注册后就会复活。因此 build() 还会清空 LOCATION。
+    """
     for row in spark.sql(f"SHOW PARTITIONS {TABLE}").collect():
         spec = row[0]                     # 形如 "as_of_dt=2019-10-01"
         k, _, v = spec.partition("=")
         spark.sql(f"ALTER TABLE {TABLE} DROP PARTITION ({k}='{v}')")
-        print(f"  🗑  注销分区 {spec}")
+        print(f"   注销分区 {spec}")
 
 
 def build(spark, start, end):
     drop_all_partitions(spark)            # 快照表只保留最新一份，先注销旧分区
+    # 外部表的 DROP PARTITION 不删文件；清理 LOCATION，连未注册的旧快照目录一起删掉
+    drop_path(spark, ADS["rfm"])
     spark.sql(SQL.format(as_of=end, start=start, end=end))
     stats = spark.sql(f"""
         SELECT COUNT(*) AS users, SUM(m_amount) AS gmv,
@@ -88,7 +94,7 @@ def main():
 
     spark = get_spark("ADS_UserRFMSnapshot")
     spark.sparkContext.setLogLevel("ERROR")
-    print(f"📈 {TABLE} 快照区间 {args.start} ~ {args.end}（as_of_dt={args.end}）")
+    print(f"{TABLE} 快照区间 {args.start} ~ {args.end}（as_of_dt={args.end}）")
     build(spark, args.start, args.end)
     print("OK: 完成")
     spark.stop()

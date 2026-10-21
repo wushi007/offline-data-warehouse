@@ -7,7 +7,7 @@
 
 1. 不抛异常。所有通道逐个 best-effort，失败即静默降级。告警自身故障不能改变任务状态，否则正常任务会被标成失败。
 2. 分级推送。只有质量阻断、失败、超时推送给人工；重试中只写入台账，避免网络抖动引起的重试淹没真实问题。
-3. DQC 失败单独标注。`ods_dqc` / `dwd_event_fact_dqc` 的失败语义是「数据质量不达标，已阻断下游」，与「脚本异常」分开报警，收到后可直接判断是数据问题还是代码问题。
+3. DQC 失败单独标注。`ods_layer` / `dwd_layer` 内部的 ODS/DWD DQC 失败语义是「数据质量不达标，已阻断下游」，与「脚本异常」分开报警，收到后可直接判断是数据问题还是代码问题。
 4. 每条告警带行动信息。包含重跑命令和日志尾部，收到后不需要再翻 UI。
 
 ## 二、通道（前两个默认开启，其余由环境变量启用）
@@ -17,8 +17,9 @@
 | 1 本地台账 | 开启 | 无 | `scheduler/alert_records/alerts-YYYY-MM-DD.jsonl`（结构化，可用 `jq` 查询），按天一个文件，放在项目内 |
 | 2 Windows 告警文件 | 开启 | 无 | `/mnt/c/Users/<用户名>/Documents/数仓告警.txt`；目录不存在时自动跳过，可用 `DW_ALERT_WIN_FILE` 覆盖 |
 | 3 桌面弹窗 | best-effort | 安装 BurntToast 后可用 | 未安装则静默跳过，不使用阻塞式 MessageBox |
-| 4 HTTP Webhook | 由环境变量控制 | `DW_ALERT_WEBHOOK` | 企业微信 / 钉钉 / 飞书群机器人，手机推送，是唯一真正主动通知的通道 |
+| 4 HTTP Webhook | 由环境变量控制 | `DW_ALERT_WEBHOOK` | 企业微信 / 钉钉 / 通用 Webhook，手机推送 |
 | 5 邮件 SMTP | 由环境变量控制 | `DW_ALERT_SMTP_HOST` / `_PORT` / `_USER` / `_PASS` / `_TO`（全部设置后启用） | — |
+| 6 飞书机器人 | 由环境变量控制 | `DW_ALERT_FEISHU_WEBHOOK` / `_SECRET` / `_STYLE` | 卡片（默认）或文本；业务失败也返回 HTTP 200，`alerts.py` 会检查响应 body |
 
 启用手机推送（拿到群机器人 URL 后，加入 `airflow/airflow-env.sh`）：
 ```bash
@@ -29,13 +30,13 @@ export DW_ALERT_WEBHOOK='https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xx
 
 | 事件 | 级别 | 推送人工 | 触发来源 |
 |---|---|---|---|
-| `quality_block` | 数据质量阻断（已拦住下游） | 是 | `ods_dqc`、`dwd_event_fact_dqc` 失败 |
-| `quality_warn` | 数据质量异常（值超阈值，未阻断下游） | 是 | `ads_trade`：GMV 相对近 7 日均值波动 >30% |
+| `quality_block` | 数据质量阻断（已拦住下游） | 是 | `ods_layer`、`dwd_layer` 失败（层内 ODS/DWD DQC 返回非 0） |
+| `quality_warn` | 数据质量异常（值超阈值，未阻断下游） | 是 | `ads_daily_layer`：GMV 相对近 7 日中位数波动 >30% |
 | `failure` | 任务失败（重试已耗尽） | 是 | 其余所有任务（`default_args` 中也兜了一层） |
 | `retry` | 任务重试中 | 否，只进台账 | 所有任务（`on_retry_callback`） |
 | `timeout` | 任务超时（疑似卡死） | 是 | 保留字；Airflow 超时会走 `failure` |
 
-超时：每个任务设置了 `execution_timeout`（`ods_import` 45 分 / `dim_session` 30 分 / `ads_user_rfm` 45 分 / 其余 20 分）。由于 `max_active_tasks=1`，一个卡死的任务会阻塞当天后续所有任务，因此需要这个兜底。
+超时：每个**层任务**设置 `execution_timeout`（ods 90 分 / dwd 75 分 / dws 110 分 / dim 120 分 / ads_daily 130 分 / ads_range 120 分，可用 `warehouse_env` 的 `<layer>_timeout_min` 覆盖）。由于 `max_active_tasks=1`，一个卡死的层会阻塞当天后续所有层，因此需要这个兜底。
 
 ## 四、台账字段
 
@@ -100,8 +101,8 @@ python scheduler/alerts.py --prune     # 立即执行保留策略
 
 除质量闸门外，还接入了指标异常检查（`etl/ads/ads_trade_daily.py::check_gmv_volatility`）：
 
-- 口径：今日 GMV 对比最近 `DQC_GMV_DAYS`(7) 天均值（不含今日），偏差超过 `DQC_GMV_VOLATILITY`(30%) 时以非 0 状态退出
-- 使用 `quality_warn` 而非 `quality_block`：`ads_trade` 是叶子节点，没有下游可拦，报「已拦住下游」与事实不符
+- 口径：今日 GMV 对比最近 `DQC_GMV_DAYS`(7) 天中位数（不含今日）；下跌超过 `DQC_GMV_DROP_BLOCK`(50%) 时阻断，上涨或小幅下跌超过 `DQC_GMV_WARN`(30%) 只告警
+- 使用 `quality_warn` 而非 `quality_block`：`ads_daily_layer` 是叶子层，没有下游可拦，报「已拦住下游」与事实不符
 - 历史不足 7 天时跳过校验（月初第 1~7 天、补历史的头几天），避免误报
 - 数据照常写出，不撤回。该检查用于暴露异常，不作为正确性闸门
 

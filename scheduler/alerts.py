@@ -83,9 +83,11 @@ def _rerun_cmd(context):
         dag_id = context["dag"].dag_id
         task_id = context["task"].task_id
         ds = context.get("ds") or "YYYY-MM-DD"
-        raw = (context["task"].bash_command or "").replace(LOCK_WRAPPER + " ", "").strip()
-        return (f"airflow tasks run {dag_id} {task_id} {ds}\n"
-                f"# 或直接跑（绕过 Airflow）：\n{raw}")
+        cmd = f"airflow tasks run {dag_id} {task_id} {ds}"
+        # TaskFlow 任务没有 bash_command；能取到才附上绕过 Airflow 的直接命令
+        raw = (getattr(context["task"], "bash_command", "") or "").replace(
+            LOCK_WRAPPER + " ", "").strip()
+        return cmd + (f"\n# 或直接跑（绕过 Airflow）：\n{raw}" if raw else "")
     except Exception:
         return "(取重跑命令失败，去 UI 重跑该 task)"
 
@@ -351,11 +353,11 @@ def prune(verbose=True):
 
     if verbose:
         if removed:
-            print(f"🧹 告警保留策略（保留 {KEEP_DAYS} 天）：清理 {len(removed)} 项")
+            print(f"告警保留策略（保留 {KEEP_DAYS} 天）：清理 {len(removed)} 项")
             for r in removed:
                 print(f"   - {r}")
         else:
-            print(f"🧹 告警保留策略（保留 {KEEP_DAYS} 天）：无需清理")
+            print(f"告警保留策略（保留 {KEEP_DAYS} 天）：无需清理")
     return removed
 
 

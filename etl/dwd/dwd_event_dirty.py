@@ -70,7 +70,7 @@ def main():
 
     spark = get_spark("DWD_EventDirty")
     spark.sparkContext.setLogLevel("ERROR")
-    print(f"🧹 {TABLE} 隔离 {len(days)} 天：{days[0]} ~ {days[-1]}")
+    print(f"{TABLE} 隔离 {len(days)} 天：{days[0]} ~ {days[-1]}")
 
     total = 0
     for d in days:

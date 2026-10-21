@@ -33,7 +33,7 @@ def main(dt: str):
         n_today = spark.read.parquet(target).count()
     except Exception:
         n_today = 0
-    print(f"🔍 [{dt}] 分区行数: {n_today:,}")
+    print(f"[{dt}] 分区行数: {n_today:,}")
     if n_today <= 0:
         print("BLOCK: 分区为空，源数据疑似漏传")
         blocked.append("empty_partition")
@@ -82,10 +82,11 @@ def main(dt: str):
                 blocked.append(f"null_{col}")
             print(f"   字段 {col:14s} 空值率: {rate:.4%}（空值 {null_cnt:,} 行）→ {status}")
 
-        # price 非法数值（NaN/Inf 视为非法）
+        # price 非法数值：NULL / NaN / ±Inf 都视为非法（price 本身已是 double）
         bad_price = df.filter(
-            F.col("price").isNull() |
-            F.col("price").cast("double").isNull()
+            F.col("price").isNull()
+            | F.coalesce(F.isnan(F.col("price")), F.lit(False))
+            | (F.abs(F.col("price")) == F.lit(float("inf")))
         ).count()
 
         total = max(df.count(), 1)
@@ -97,7 +98,7 @@ def main(dt: str):
 
     spark.stop()
     if blocked:
-        print(f"\n🚫 ODS DQC 未通过：{blocked}")
+        print(f"\nODS DQC 未通过：{blocked}")
         sys.exit(1)
     print("\nOK: ODS DQC 全部通过")
 

@@ -1,0 +1,4 @@
+# ADS 区间：2 张全区间任务（不是单日），参数是 --start/--end，最重，单独一组
+# 用法：./run.sh inject --plan etl/plans/ads_range.txt --dt 2019-11-01 --fail-fast
+etl/ads/ads_user_retention_daily.py  --start 2019-10-01 --end {dt}
+etl/ads/ads_user_rfm_snapshot.py     --start 2019-10-01 --end {dt}

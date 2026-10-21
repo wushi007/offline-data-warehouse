@@ -57,7 +57,7 @@ def main():
     days = [args.dt] if args.dt else date_range(args.start, args.end)
     spark = get_spark("DWS_TrafficHourDaily")
     spark.sparkContext.setLogLevel("ERROR")
-    print(f"📊 {TABLE} 汇总 {len(days)} 天：{days[0]} ~ {days[-1]}")
+    print(f"{TABLE} 汇总 {len(days)} 天：{days[0]} ~ {days[-1]}")
     for d in days:
         build(spark, d)
     print("OK: 完成")

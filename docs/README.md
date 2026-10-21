@@ -30,7 +30,7 @@ docs/
 | | `incremental/`（本次，2026-09-29 起） | `legacy/`（旧，2026-08 及更早） |
 |---|---|---|
 | 代码 | `etl/` 下一表一文件、每层一个文件夹 | 多张表集中在一个脚本里（如 `build_dims.py`、`dws_aggregate.py`），这些文件已被删除或取代 |
-| 调度 | Airflow（`scheduler/incremental_warehouse_dag.py`，一表一 task） | 手动 / `run.sh` |
+| 调度 | Airflow（`scheduler/incremental_warehouse_dag.py`，一层一 task，层内单 Session 串行） | 手动 / `run.sh` |
 | 引擎 | Spark（HDFS + Hive metastore） | Spark + StarRocks 双引擎 |
 | 存储 | Hive 外部表，19 张（5 层） | 部分表随 2026-09-29 数仓清空被 DROP |
 | 数据区间 | 2019-10-01 ~ 2019-11-04（已处理） | 2019-10-01 ~ 2019-11-03（34 天） |
@@ -43,7 +43,7 @@ docs/
 | 文档 | 内容 |
 |---|---|
 | [WAREHOUSE_BUILD.md](incremental/WAREHOUSE_BUILD.md) | 建设过程与结果：19 张表清单、分层依赖、SCD2 设计、幂等机制、跨层对账、与旧文档的交叉验证、常用命令 |
-| [ALERTS.md](incremental/ALERTS.md) | 任务告警机制：4+1 通道、事件分级、触发点、台账字段与样例、手机推送配置、已知局限 |
+| [ALERTS.md](incremental/ALERTS.md) | 任务告警机制：6 通道、事件分级、触发点、台账字段与样例、手机推送配置、已知局限 |
 
 ## `legacy/` —— 旧实现
 

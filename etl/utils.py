@@ -50,7 +50,7 @@ def drop_path(spark, path, keep_dir=True):
     fs = jpath.getFileSystem(conf)
     if fs.exists(jpath):
         fs.delete(jpath, True)
-        print(f"  🗑  已清空 {path}")
+        print(f"   已清空 {path}")
     else:
         print(f"  (跳过) {path} 不存在")
     if keep_dir:

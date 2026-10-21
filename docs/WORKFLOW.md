@@ -62,15 +62,18 @@ git push
 cd ~/ecom-warehouse
 
 ./run.sh ddl                                    # 建库建表（首次）
-./run.sh build --start 2019-10-01 --end 2019-10-31   # 全链路 + 对账
-./run.sh build --dt 2019-11-01                  # 单日增量
-./run.sh check --start 2019-10-01 --end 2019-10-31   # 只对账
+./run.sh build --start 2019-10-01 --end 2019-11-30   # 区间全链路（DIM 全量重算）+ 对账
+./run.sh build --dt 2019-11-01                  # 单日增量（DIM 走增量）
+./run.sh check --start 2019-10-01 --end 2019-11-30   # 只对账
 
 # 单张表（调试用，一表一进程）
 ./run.sh dwd --dt 2019-11-01
 ./run.sh dim-scd2 --dt 2019-11-01
 ./run.sh ads --dt 2019-11-01
 ```
+
+> 区间 `build` 会按 `[start,end]` 全量重算 DIM（SCD2 窗口重建）；如果库里已有更晚数据，
+> 请传完整数据区间，否则窗口外的 SCD2 历史版本会被覆盖。
 
 `run.sh` 按以下顺序查找解释器：`PYTHON` 环境变量 → 仓库内 `.venv` → 同级 `.venv` →
 `~/my-spark/.venv`。venv 位于 `~/my-spark/.venv` 时会自动匹配，无需额外传参。
@@ -96,17 +99,16 @@ cd ~/my-spark
 
 ## 四、Airflow
 
-Airflow 有两条链路：
+当前只有一个调度 DAG：
 
 ```
 ~/my-spark/airflow/dags/incremental_warehouse_dag.py
    → 软链接 → ~/ecom-warehouse/scheduler/incremental_warehouse_dag.py   ← 实体在这
-
-~/my-spark/airflow/dags/ecom_warehouse_dag.py   （第一版项目的真实文件）
 ```
 
-修改 `~/ecom-warehouse/scheduler/incremental_warehouse_dag.py` 即修改 Airflow 的 DAG，
-提交推送后 Airflow 自动重新加载，同一份代码在两处使用。
+旧的 `ecom_warehouse_dag.py` 已移出 `dags/`（现在在 `dags_disabled/`），调度器不会加载。
+修改 `~/ecom-warehouse/scheduler/incremental_warehouse_dag.py` 即修改 Airflow 的 DAG；
+DAG processor 运行时会自动重新解析。
 
 启停：
 
@@ -151,7 +153,7 @@ wsl -d Ubuntu-22.04 -- bash -c 'sudo -n chown -R lst:lst ~/ecom-warehouse'
 |---|---|---|
 | 定位 | 项目代码，用于展示 | 本地开发环境 |
 | 远端 | `wushi007/offline-data-warehouse` | 无（本地环境不需要远端） |
-| git 里有什么 | 61 个文件，代码+文档 | 只有 `.gitignore` |
+| git 里有什么 | 代码 + 文档（`etl/`、`scheduler/`、`docs/` 等） | 只有 `.gitignore` |
 | 会修改它吗 | 经常修改 | 基本不动 |
 | 提交推送 | 需要 | 不需要 |
 

@@ -25,7 +25,7 @@ SQL = f"""
     SELECT `rank`, product_id, category_id, brand, sales_cnt, sales_amount, exposure_uv
     FROM (
         SELECT
-            ROW_NUMBER() OVER (ORDER BY sales_amount DESC, sales_cnt DESC) AS `rank`,
+            ROW_NUMBER() OVER (ORDER BY sales_amount DESC, sales_cnt DESC, product_id) AS `rank`,
             product_id, category_id, brand, sales_cnt, sales_amount, exposure_uv
         FROM {DWS_PRODUCT} WHERE {P} = '{{dt}}'
     ) t WHERE `rank` <= {TOP_N}
@@ -56,7 +56,7 @@ def main():
     days = [args.dt] if args.dt else date_range(args.start, args.end)
     spark = get_spark("ADS_ProductHotRankDaily")
     spark.sparkContext.setLogLevel("ERROR")
-    print(f"📈 {TABLE} {len(days)} 天：{days[0]} ~ {days[-1]}")
+    print(f"{TABLE} {len(days)} 天：{days[0]} ~ {days[-1]}")
     for d in days:
         build(spark, d)
     print("OK: 完成")

@@ -84,7 +84,7 @@ usage() {
 用法: ./run.sh <命令> [参数]
 
 建表 / 调度
-  ddl                         建全链路库表（5 库 19 张）+ MSCK 注册 ODS 分区
+  ddl                         建全链路库表（5 库 19 张）+ MSCK 注册全部分区表（RFM 快照除外）
   ddl --drop-tables dim.dim_user   只重建指定表（改 schema 时用，自动 MSCK）
 
 ODS 接入
@@ -94,10 +94,16 @@ ODS 接入
   backfill --start D --end D  批量回补 ODS（逐日）
 
 整条链路（一个进程、一个 SparkSession）
-  build --start D --end D     全链路：DWD→DWS→DIM→ADS + 跨层对账
-  build --dt D                单日增量（DIM 走增量）
+  build --start D --end D     区间全链路：DWD→DWS→DIM(全量重算)→ADS(含留存/RFM) + 跨层对账
+  build --dt D                单日增量（DIM 走增量；留存/RFM 按 DATA_START..D 重建）
   build --only dwd,dws        只跑指定层
   check --start D --end D     只做跨层对账，不重新构建
+
+按层注入（一个进程、一个 Context、一个 Session；层内逐表串行）
+  inject --plan etl/plans/dwd.txt --dt D   注入一整层（清单见 etl/plans/）
+  inject --plan ... --dt D --fail-fast     任一张失败即停（DAG 用这个）
+  inject 'etl/dws/dws_product_daily.py --dt D'   注入单条
+  inject --plan ... --dt D --dry-run       只解析清单，不连集群
 
 单张表（一张表一个进程，便于单表重试/定位问题）
   ods    --dt D               etl/ods/ods_event_log.py
@@ -119,6 +125,7 @@ case "${1:-}" in
         run etl/ods/ods_event_log.py --dt "$D"
         run etl/ods/ods_event_log_dqc.py --dt "$D"
         ;;
+    inject)     run etl/injector.py "${@:2}" ;;
     build)      run etl/pipeline.py "${@:2}" ;;
     check)      run etl/pipeline.py "${@:2}" --only "" --check-only ;;
 
@@ -140,5 +147,5 @@ case "${1:-}" in
         shift || true
         run "$S" "$@"
         ;;
-    *) usage ;;
+    *) usage >&2; exit 2 ;;
 esac

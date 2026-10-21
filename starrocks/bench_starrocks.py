@@ -178,7 +178,7 @@ def main():
         mbps = round(col_bytes / 1024 / 1024 / best_s, 1)
         q1["rows_per_sec"] = rps
         q1["mb_per_sec"] = mbps
-        print(f"\n📈 真实扫描吞吐（Q1 SUM(price)，读 price 列 {total_rows/1e6:.1f}M×8B）:")
+        print(f"\n真实扫描吞吐（Q1 SUM(price)，读 price 列 {total_rows/1e6:.1f}M×8B）:")
         print(f"   {rps:,} 行/s | {mbps:,.1f} MB/s（原始体积口径，最优 {q1['best_ms']:.1f}ms）")
     print("   （Q1m COUNT(*) 走元数据优化，不计入扫描吞吐）")
 
@@ -200,7 +200,7 @@ def main():
     if wanted:
         out["partial"] = f"单条重测，仅包含 {[r['qid'] for r in results]}"
     out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\n📄 结果已存: {out_path}")
+    print(f"\n结果已存: {out_path}")
 
 
 if __name__ == "__main__":
