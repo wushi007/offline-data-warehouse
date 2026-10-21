@@ -1,0 +1,7 @@
+# DIM 层：4 张维表，互不依赖，都只读 dwd.dwd_event_fact
+# 顺序按体量排：SCD2 全量重算 → user → session（924 万行增量）→ category
+# 用法：./run.sh inject --plan etl/plans/dim.txt --dt 2019-11-01 --fail-fast
+etl/dim/dim_product_scd2.py  --dt {dt}
+etl/dim/dim_user.py          --dt {dt}
+etl/dim/dim_session.py       --dt {dt}
+etl/dim/dim_category.py      --dt {dt}

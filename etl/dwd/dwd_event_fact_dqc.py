@@ -123,7 +123,7 @@ def check_day(spark, dt):
 
     rows = spark.sql(dqc_sql(dt)).collect()
 
-    print(f"🔍 [{dt}] DWD 质量校验")
+    print(f"[{dt}] DWD 质量校验")
     blocked = []
     for r in rows:
         ok = r["status"] == "PASS"

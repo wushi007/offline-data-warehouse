@@ -181,7 +181,7 @@ def main():
     if wanted:
         out["partial"] = f"单条重测，仅包含 {[r['qid'] for r in results]}"
     out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\n📄 结果已存: {out_path}")
+    print(f"\n结果已存: {out_path}")
 
 
 def fn_timed(fn):

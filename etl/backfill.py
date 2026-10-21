@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VENV_PY = f"{ROOT.parent}/.venv/bin/python"
+VENV_PY = f"{ROOT}/.venv/bin/python"
 
 STEPS = [
     ("ods_import", "etl/ods/ods_event_log.py", "ODS 导入"),
@@ -31,7 +31,7 @@ ENV.update({
 
 
 def run_day(day: str) -> bool:
-    print(f"\n{'=' * 70}\n📅 回补 {day}\n{'=' * 70}")
+    print(f"\n{'=' * 70}\n回补 {day}\n{'=' * 70}")
     ok = True
     for key, script, label in STEPS:
         cmd = [VENV_PY, str(ROOT / script), "--dt", day]
@@ -65,7 +65,7 @@ def main():
     if failed_days:
         print(f"WARN: 回补完成，失败 {len(failed_days)} 天：{failed_days}")
         sys.exit(1)
-    print(f"🎉 回补全部成功（{args.start} ~ {args.end}）")
+    print(f"回补全部成功（{args.start} ~ {args.end}）")
 
 
 if __name__ == "__main__":

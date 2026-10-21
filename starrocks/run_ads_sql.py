@@ -124,7 +124,7 @@ def main():
         s, e = date.fromisoformat(start), date.fromisoformat(end)
         days = [(s + timedelta(days=i)).isoformat() for i in range((e - s).days + 1)]
 
-    print(f"🎯 目标库 {args.db}｜区间 {start} ~ {end}（{len(days)} 天）｜{len(files)} 个文件")
+    print(f"目标库 {args.db}｜区间 {start} ~ {end}（{len(days)} 天）｜{len(files)} 个文件")
     ensure_tables(args.db, args.host, args.port, args.user,
                   [f.stem for f in files])
     print()

@@ -32,10 +32,11 @@ WITH daily AS (
     WHERE {p} BETWEEN '{start}' AND '{end}'
     GROUP BY {p}, product_id, category_id, category_code, brand
 ),
-dominant AS (                         -- 同票数按 category_id 兜底，保证确定性
+dominant AS (                         -- 同票数按 category_id → category_code → brand 兜底；只用前两个仍可能平票，
+    -- Spark 不保证稳定排序，rebuild 与增量会选中不同组合
     SELECT event_date, product_id, category_id, category_code, brand,
            ROW_NUMBER() OVER (PARTITION BY event_date, product_id
-                              ORDER BY cnt DESC, category_id) AS rn
+                              ORDER BY cnt DESC, category_id NULLS LAST, category_code NULLS LAST, brand NULLS LAST) AS rn
     FROM daily
 ),
 d AS (SELECT * FROM dominant WHERE rn = 1),
@@ -85,9 +86,9 @@ WITH daily AS (
     WHERE {p} = '{dt}'
     GROUP BY product_id, category_id, category_code, brand
 ),
-dominant AS (                         -- 同票数按 category_id 兜底
+dominant AS (                         -- 同票数按 category_id → category_code → brand 兜底（与 SCD2_SQL 必须完全一致）
     SELECT product_id, category_id, category_code, brand,
-           ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY cnt DESC, category_id) AS rn
+           ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY cnt DESC, category_id NULLS LAST, category_code NULLS LAST, brand NULLS LAST) AS rn
     FROM daily
 ),
 today AS (
@@ -96,9 +97,19 @@ today AS (
     FROM dominant WHERE rn = 1
 ),
 cur AS (                              -- 当前开放版本来自快照，避免读写同一张表
-    SELECT dim_product_sk, product_id, category_id, category_code, brand, dw_start_date,
-           COALESCE(category_id, -1) || '|' || COALESCE(category_code, '') || '|' || COALESCE(brand, '') AS combo
-    FROM t_scd2_snapshot WHERE dw_is_current = 1
+    -- 每商品只取 dim_product_sk 最大的当前版本。表若已存在多个 is_current=1 的脏行，
+    -- 直接 LEFT JOIN 会把 opened 放大成多行（一因多果），越跑越脏 —— 这里先收敛成一行。
+    SELECT dim_product_sk, product_id, category_id, category_code, brand, dw_start_date, combo
+    FROM (
+        SELECT s.dim_product_sk, s.product_id, s.category_id, s.category_code, s.brand,
+               s.dw_start_date,
+               COALESCE(s.category_id, -1) || '|' || COALESCE(s.category_code, '') || '|'
+                   || COALESCE(s.brand, '') AS combo,
+               ROW_NUMBER() OVER (PARTITION BY s.product_id
+                                  ORDER BY s.dim_product_sk DESC) AS rn
+        FROM t_scd2_snapshot s
+        WHERE s.dw_is_current = 1
+    ) x WHERE rn = 1
 ),
 closed AS (                           -- 闭链：属性变化，旧版本 end = 变更日
     SELECT c.dim_product_sk, c.product_id, c.category_id, c.category_code, c.brand,
@@ -133,6 +144,38 @@ SELECT dim_product_sk, product_id, category_id, category_code, brand,
 """
 
 
+def _preflight(spark, dt):
+    """增量前置守卫：表已脏或回补历史时直接失败，避免越滚越脏。
+
+    两个真实踩过的坑：
+      1. 某商品有多个 dw_is_current=1 时，SCD2_INCREMENTAL_SQL 的 opened 会被
+         LEFT JOIN 放大，每次增量都再多开链 —— 必须先把表修干净；
+      2. dt 早于已有最新版本起始日（回补历史）时，闭链会把 dw_end_date 写成
+         早于 dw_start_date，产生倒挂区间。
+    """
+    st = spark.sql(f"""
+        SELECT COUNT(*) AS versions,
+               COUNT(DISTINCT product_id) AS products,
+               SUM(CASE WHEN dw_is_current = 1 THEN 1 ELSE 0 END) AS current_ver,
+               MAX(CASE WHEN dw_is_current = 1 THEN dw_start_date END) AS max_start
+        FROM {TABLE}
+    """).collect()[0]
+
+    if st["versions"] == 0:
+        raise SystemExit(f"FAIL: {TABLE} 为空，请先全量重建 --start/--end")
+
+    if st["current_ver"] != st["products"]:
+        raise SystemExit(
+            f"FAIL: 当前版本数 {st['current_ver']:,} ≠ 商品数 {st['products']:,}，"
+            f"存在多 current 脏行。先全量重建："
+            f"python etl/dim/dim_product_scd2.py --start 2019-10-01 --end 2019-11-30")
+
+    if st["max_start"] is not None and dt < str(st["max_start"]):
+        raise SystemExit(
+            f"FAIL: {dt} 早于已有最新版本起始日 {st['max_start']}，"
+            f"增量只允许向前。回补历史请用 --start/--end 全量重建。")
+
+
 def _validate(spark, dt=None):
     """拉链不变量校验：每商品恰好一个当前版本；区间无重叠；同一商品同日不重复起始。"""
     bad_current = spark.sql(f"""
@@ -154,9 +197,14 @@ def _validate(spark, dt=None):
             GROUP BY product_id, dw_start_date HAVING COUNT(*) > 1
         ) t
     """).collect()[0]["c"]
-    flag = "OK" if bad_current == 0 and bad_range == 0 and dup_start == 0 else "FAIL"
-    print(f"  {flag} 拉链校验：当前版本数≠1 的商品 {bad_current} / 区间重叠 {bad_range}"
-          f" / 同商品同日重复起始 {dup_start}（均须为 0）")
+    ok = bad_current == 0 and bad_range == 0 and dup_start == 0
+    print(f"  {'OK' if ok else 'FAIL'} 拉链校验：当前版本数≠1 的商品 {bad_current}"
+          f" / 区间重叠 {bad_range} / 同商品同日重复起始 {dup_start}（均须为 0）")
+    # 只打印不报错会让 DAG 把带病的表当成功（原实现就是这个缺陷）
+    if not ok:
+        raise SystemExit(
+            f"FAIL: {TABLE} 拉链校验未通过（重叠 {bad_range} / 重复起始 {dup_start}）"
+            f"，请全量重建：--start 2019-10-01 --end <末日>")
 
 
 def rebuild(spark, start, end):
@@ -183,6 +231,8 @@ def build_inc(spark, dt):
 
     Spark 不允许写入的目标表同时被读取，故先落快照，再经临时路径写回。
     """
+    _preflight(spark, dt)
+
     snap_path = f"{STAGING}_snap"
     drop_path(spark, snap_path)
     spark.table(TABLE).write.mode("overwrite").option("compression", "snappy").parquet(snap_path)
@@ -220,10 +270,10 @@ def main():
     spark = get_spark("Dim_Product_SCD2")
     spark.sparkContext.setLogLevel("ERROR")
     if args.dt:
-        print(f"🏗  {TABLE} 增量 {args.dt}")
+        print(f"{TABLE} 增量 {args.dt}")
         build_inc(spark, args.dt)
     else:
-        print(f"🏗  {TABLE} 全量重建 {args.start} ~ {args.end}")
+        print(f"{TABLE} 全量重建 {args.start} ~ {args.end}")
         drop_path(spark, STAGING)      # 重建前清旧文件（外部表 DROP 不删文件）
         rebuild(spark, args.start, args.end)
     print("OK: 完成")

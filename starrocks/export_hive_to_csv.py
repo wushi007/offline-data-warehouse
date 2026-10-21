@@ -118,7 +118,7 @@ def main():
     spark = get_spark("ExportHiveToCSV", memory=args.memory)
     spark.sparkContext.setLogLevel("ERROR")
 
-    print(f"📤 导出 {len(todo)} 张表 → {out_dir}")
+    print(f"导出 {len(todo)} 张表 → {out_dir}")
     print(f"   CSV 约定：无表头 / 逗号分隔 / NULL=\\N / timestamp=yyyy-MM-dd HH:mm:ss")
     print()
 

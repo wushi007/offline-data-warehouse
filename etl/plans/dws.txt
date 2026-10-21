@@ -1,0 +1,6 @@
+# DWS 层：4 张日报，互不依赖，都只读 dwd.dwd_event_fact
+# 用法：./run.sh inject --plan etl/plans/dws.txt --dt 2019-11-01 --fail-fast
+etl/dws/dws_user_session_daily.py   --dt {dt}
+etl/dws/dws_product_daily.py        --dt {dt}
+etl/dws/dws_user_behavior_daily.py  --dt {dt}
+etl/dws/dws_traffic_hour_daily.py   --dt {dt}
