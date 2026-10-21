@@ -39,7 +39,7 @@ REBUILD_SQL = f"""
 # 增量只追加新会话，不重写整表：dim_session 有 924 万行，整表读写会导致 OOM。
 # 会话按首次出现定稿，跨天续期不延长 end_time；需精确值时跑全量重建，反连接保证重跑幂等。
 INC_SQL = """
-INSERT INTO TABLE dim.dim_session
+INSERT INTO TABLE {table}
 WITH today AS (
     SELECT user_session, MAX(user_id) AS user_id,
            MIN(event_time) AS st, MAX(event_time) AS et
@@ -76,7 +76,7 @@ def build_inc(spark, dt):
     spark.read.parquet(SNAP).createOrReplaceTempView("t_session_snapshot")
 
     before = spark.sql(f"SELECT COUNT(*) AS c FROM {TABLE}").collect()[0]["c"]
-    spark.sql(INC_SQL.format(fact=FACT, p=PARTITION_COL, dt=dt))
+    spark.sql(INC_SQL.format(table=TABLE, fact=FACT, p=PARTITION_COL, dt=dt))
     drop_path(spark, SNAP)
 
     after = spark.sql(f"SELECT COUNT(*) AS c FROM {TABLE}").collect()[0]["c"]
@@ -96,10 +96,10 @@ def main():
     spark = get_spark("Dim_Session")
     spark.sparkContext.setLogLevel("ERROR")
     if args.dt:
-        print(f"🏗  {TABLE} 增量 {args.dt}")
+        print(f"{TABLE} 增量 {args.dt}")
         build_inc(spark, args.dt)
     else:
-        print(f"🏗  {TABLE} 全量重建")
+        print(f"{TABLE} 全量重建")
         rebuild(spark)
     print("OK: 完成")
     spark.stop()

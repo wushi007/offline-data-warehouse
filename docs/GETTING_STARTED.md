@@ -191,11 +191,17 @@ VALID_EVENT_TYPES = ["view", "cart", "remove_from_cart", "purchase"]
 DEDUP_KEYS = ["user_id", "event_time", "product_id", "event_type"]   # 去重键
 
 # DQC 质量闸门阈值
-DQC_DIRTY_RATIO_LIMIT = 0.02        # 脏数据比例 >2% 阻断
-DQC_GMV_VOLATILITY    = 0.30        # GMV 相对 7 日均波动 >30% 阻断
-DQC_ROWS_WARN         = 0.50        # 行数波动 50% 告警
-DQC_ROWS_BLOCK        = 0.80        # 行数波动 80% 阻断
+DQC_GMV_DAYS          = 7           # GMV 对比近 7 日中位数
+DQC_GMV_WARN          = 0.30        # 偏离 >30% 告警（涨跌都告警）
+DQC_GMV_DROP_BLOCK    = 0.50        # 下跌 >50% 阻断
+DQC_ROWS_7D_DAYS      = 7
+DQC_ROWS_WARN         = 0.50        # 行数偏离 >50% 告警
+DQC_ROWS_DROP_BLOCK   = 0.50        # 下跌 >50% 阻断
+DQC_NULL_MAX_RATE     = 0.001       # 单字段空值率上限 0.1%
 ```
+
+> `DATA_START/END` 是 `pipeline` 的默认区间；DAG 使用 `warehouse_env` 的
+> `data_start` / `data_end`（当前 `2019-10-01 ~ 2019-11-30`）。
 
 ### 数据库凭据（从环境变量读取）
 
@@ -254,7 +260,7 @@ SPARK_HOME=/your/spark PYTHON=/path/to/python ./run.sh build --dt 2019-11-01
 - 创建 5 个库（`ods` / `dwd` / `dim` / `dws` / `ads`）
 - 创建 19 张表，均为 Hive 外部表 + LOCATION 指向 HDFS
 - 存储格式 PARQUET + SNAPPY
-- 对 ODS 执行 `MSCK REPAIR TABLE` 注册已有分区
+- 对全部分区表执行 `MSCK REPAIR TABLE` 注册已有分区（RFM 快照由脚本自行维护，跳过）
 
 使用外部表时，重建只需 `DROP` + `CREATE`，HDFS 数据文件保留；代价是重建前必须手动清理目录（见「常见问题」）。
 
@@ -271,16 +277,21 @@ SPARK_HOME=/your/spark PYTHON=/path/to/python ./run.sh build --dt 2019-11-01
 ### 方式一：全链路（推荐首次）
 
 ```bash
-./run.sh build --start 2019-10-01 --end 2019-10-31
+./run.sh build --start 2019-10-01 --end 2019-11-30
 ```
 
-单个进程、单个 SparkSession 完成 DWD → DWS → DIM → ADS，最后自动跨层对账。复用会话可减少每日多次启动 SparkSession 的开销。
+单个进程、单个 SparkSession 完成 DWD → DWS → DIM → ADS（含留存/RFM），最后自动跨层对账。
+区间模式下 DIM 走全量重算：SCD2 按 `[start,end]` 重建，其余维表扫描全部 DWD 分区；
+留存/RFM 按区间各跑一次。**请传完整数据区间**，否则窗口外的 SCD2 历史版本会被覆盖。
+（只导入了 10 月数据时，把 `--end` 改成 `2019-10-31`。）
 
 ### 方式二：单日增量
 
 ```bash
 ./run.sh build --dt 2019-11-01
 ```
+
+单日模式 DIM 走增量；留存/RFM 按 `DATA_START..dt` 重建一次（与 DAG 的 ads_range 层一致）。
 
 ### 方式三：只跑某层
 
@@ -313,6 +324,9 @@ SPARK_HOME=/your/spark PYTHON=/path/to/python ./run.sh build --dt 2019-11-01
 ```
 
 > `ods-bulk` 更快：整份 CSV 只扫描一次，按日期切分分区；逐日导入会重复扫描 31 次。
+>
+> `ods-import` / `day` 默认读 `SRC_CSV_2019NOV`（2019-Nov.csv）。导入 2019-10 请用
+> `./run.sh ods-bulk --csv <HDFS>/2019-Oct.csv`，或先修改 `config/config.py` 的源路径。
 
 ### 串行闸门（重要）
 
@@ -333,19 +347,19 @@ exec flock -w "$WAIT" "$LOCK" "$@"
 ### 跨层对账
 
 ```bash
-./run.sh check --start 2019-10-01 --end 2019-10-31
+./run.sh check --start 2019-10-01 --end 2019-11-30
 ```
 
-输出（实测）：
+输出（当前 61 天全量实测）：
 
 ```
-DWD 明细 42,413,557 行 / 购买 742,773 / GMV 229,933,212.63
-OK 购买次数守恒 DWD=DWS用户=DWS商品=DWS会话=ADS: 742,773
-OK GMV 守恒     DWD=DWS用户=DWS商品=ADS: 229,933,212.63
+DWD 明细 109,806,507 行 / 购买 1,680,272 / GMV 511,810,289.17
+OK 购买次数守恒 DWD=DWS用户=DWS商品=DWS会话=ADS: 1,680,272
+OK GMV 守恒     DWD=DWS用户=DWS商品=ADS: 511,810,289.17
 OK 漏斗不变量（每日 view_uv 为上游最大值）: 0 天违规
 OK SCD2 每商品单一当前版本: 0 个违规
-OK 分时守恒 DWS=ADS=DWD明细: PV 42,413,557 / 购买 742,773
-OK 留存不变量（D+n 人数 ≤ D0）: 0 天违规；其中 7 天 D+7 右删失（NULL）
+OK 分时守恒 DWS=ADS=DWD明细: PV 109,806,507 / 购买 1,680,272
+OK 留存覆盖与不变量: 61/61 天，0 天违规；其中 7 天右删失（NULL）
 ```
 
 ### 直接查数据
@@ -355,8 +369,8 @@ OK 留存不变量（D+n 人数 ≤ D0）: 0 天违规；其中 7 天 D+7 右删
 SELECT * FROM ads.ads_trade_daily ORDER BY event_date DESC LIMIT 10;
 
 -- RFM 分群分布
-SELECT segment, COUNT(*) users, SUM(monetary) gmv
-FROM ads.ads_user_rfm_snapshot GROUP BY segment ORDER BY gmv DESC;
+SELECT rfm_seg, COUNT(*) users, SUM(m_amount) gmv
+FROM ads.ads_user_rfm_snapshot GROUP BY rfm_seg ORDER BY gmv DESC;
 
 -- SCD2 拉链
 SELECT * FROM dim.dim_product_scd2 WHERE product_id = 1004856;
@@ -406,7 +420,7 @@ ln -s /path/to/ecom-warehouse/scheduler/incremental_warehouse_dag.py \
 
 | 产物 | 谁读它 | 内容 |
 |---|---|---|
-| Airflow Variable `warehouse_env`（JSON） | DAG | `project_root` / `venv_python` / `java_home` / `spark_home` / `hadoop_home` / `hadoop_conf_dir` / `data_start` / `data_end`（可选覆盖：`timeout_overrides_min` / `quality_tasks` / `quality_warn_tasks` / `default_timeout_min` / `owner`） |
+| Airflow Variable `warehouse_env`（JSON） | DAG | `project_root` / `venv_python` / `java_home` / `spark_home` / `hadoop_home` / `hadoop_conf_dir` / `data_start` / `data_end`（可选覆盖：`<layer>_timeout_min` / `quality_tasks` / `quality_warn_tasks` / `default_timeout_min` / `owner`） |
 | `$AIRFLOW_HOME/airflow-env.sh` | Airflow 三进程 | `AIRFLOW__*` 环境变量（元数据库、端口、并发、摘代理） |
 
 ```bash
@@ -473,22 +487,23 @@ DAG 内部的配置优先级（高 → 低），任一层可覆盖下一层：
 
 ### 5. DAG 结构
 
-一表一个 task（共 21 个 task / 21 条依赖边），依赖链如下：
+一层一个 task（共 7 个 task / 6 条依赖边），层内逐表串行：
 
 ```
 check_env
-  → ods_import → ods_dqc
-      → [dwd_event_fact, dwd_event_dirty]
-          → dwd_event_fact_dqc
-              → dws_user_session / dws_product / dws_user_behavior / dws_traffic_hour
-              → ads_conversion_funnel / ads_user_rfm   （区间型，直接依赖 DQC）
-              dws_user_behavior → ads_trade / ads_user_retention
-              dws_product       → ads_product_hot_rank
-              dws_user_session  → ads_session_behavior
-              dws_traffic_hour  → ads_traffic_hour
+  → ods_layer        （ods_event_log → ods_event_log_dqc）
+  → dwd_layer        （dwd_event_fact → dwd_event_dirty → dwd_event_fact_dqc）
+  → dws_layer        （4 张 DWS）
+  → dim_layer        （SCD2 + 3 张增量维表）
+  → ads_daily_layer  （5 张 ADS 日报）
+  → ads_range_layer  （留存 / RFM，区间型）
 ```
 
-质量闸门失败会阻断下游：`dwd_event_fact_dqc` 不通过时，DWS 和 ADS 均不运行。
+每层是一个独立子进程：一个 SparkContext + 一个 Session，层内所有表复用同一个
+Session 串行执行，脚本里的 `spark.stop()` 被 injector 拦截，不会逐表重启。
+`max_active_tasks=1` + `flock` 保证同一时刻只处理一张表。
+
+质量闸门失败会阻断下游：`ods_layer` / `dwd_layer` 不通过时，后续层均不运行。
 
 ### 6. 触发回补
 
@@ -501,14 +516,15 @@ airflow backfill create --dag-id incremental_warehouse_dag \
 
 ### 7. 告警
 
-`scheduler/alerts.py` 接入 4+1 个通道，由 DAG 的 `on_failure_callback` 触发：
+`scheduler/alerts.py` 接入 6 个通道，由 DAG 的 `on_failure_callback` 触发：
 
 | 通道 | 默认 | 说明 |
 |---|---|---|
 | 本地台账 | 开 | `scheduler/alert_records/alerts-YYYY-MM-DD.jsonl` |
 | Windows 文件 | 开 | 写到 `/mnt/c/.../数仓告警.txt`（WSL 场景） |
 | 桌面弹窗 | 尽力 | 装了 BurntToast 才有 |
-| HTTP Webhook | 需配置 | `DW_ALERT_WEBHOOK=<企业微信/钉钉/飞书机器人>` |
+| HTTP Webhook | 需配置 | `DW_ALERT_WEBHOOK=<企业微信/钉钉机器人>` |
+| 飞书机器人 | 需配置 | `DW_ALERT_FEISHU_WEBHOOK` / `_SECRET` / `_STYLE`（卡片或文本） |
 | 邮件 SMTP | 需配置 | `DW_ALERT_SMTP_HOST/_PORT/_USER/_PASS/_TO` |
 
 设计原则：告警本身出错不影响任务状态；按级别推送，仅「失败 / 质量阻断 / 超时」推送给人，「重试中」只写入台账；每条告警附带重跑命令和日志尾部。

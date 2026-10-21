@@ -97,7 +97,7 @@ def main():
 
     spark = get_spark("ADS_UserRetentionDaily")
     spark.sparkContext.setLogLevel("ERROR")
-    print(f"📈 {TABLE} {args.start} ~ {args.end}")
+    print(f"{TABLE} {args.start} ~ {args.end}")
     build_range(spark, args.start, args.end)
     print("OK: 完成")
     spark.stop()

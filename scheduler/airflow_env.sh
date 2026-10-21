@@ -159,19 +159,19 @@ show() {
     fi
     echo "── 存在性检查 ──────────────────────────────"
     for p in "$VENV_PYTHON" "$JAVA_HOME" "$SPARK_HOME" "$HADOOP_HOME" "$HADOOP_CONF_DIR"; do
-        [ -e "$p" ] && echo "  ✓ $p" || echo "  ✗ $p  （不存在）"
+        [ -e "$p" ] && echo "  $p" || echo "  $p  （不存在）"
     done
     echo "── 已生成的配置文件 ────────────────────────"
     for f in "$ENV_FILE" "$VARIABLE_JSON"; do
-        [ -f "$f" ] && echo "  ✓ $f" || echo "  - $f  （还没生成）"
+        [ -f "$f" ] && echo "  $f" || echo "  - $f  （还没生成）"
     done
     if [ -x "$AIRFLOW_VENV/bin/airflow" ]; then
         echo "── Airflow 记录的 Variable ─────────────────"
         ( set +u; source "$ENV_FILE" 2>/dev/null || true
           if "$AIRFLOW_VENV/bin/airflow" variables get warehouse_env >/dev/null 2>&1; then
-              echo "  ✓ warehouse_env 已写入元数据库（DAG 加载时会读它）"
+              echo "  warehouse_env 已写入元数据库（DAG 加载时会读它）"
           else
-              echo "  ✗ warehouse_env 未写入 —— 跑一次不带 --show 的本脚本"
+              echo "  warehouse_env 未写入 —— 跑一次不带 --show 的本脚本"
           fi )
     fi
 }

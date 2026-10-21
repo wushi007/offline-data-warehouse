@@ -20,12 +20,12 @@
 
 ## 项目亮点
 
-- 一表一文件：29 个 ETL 脚本按层组织（`etl/<层>/<表>.py`），每张表独立运行、独立重试，定位问题不需要读整条链路
-- SCD2 拉链：从事实表反推商品属性，日主导组合去噪 → 变更打点 → 折叠区间 → 开链/闭链，落地 172,794 个版本
+- 一表一文件：24 张表层脚本 + 6 个公共工具按层组织（`etl/<层>/<表>.py`），每张表独立运行、独立重试，定位问题不需要读整条链路
+- SCD2 拉链：从事实表反推商品属性，日主导组合去噪 → 变更打点 → 折叠区间 → 开链/闭链，全量落地 222,761 个版本（206,876 商品）
 - 全链路幂等：分区级 `INSERT OVERWRITE` + 确定性去重排序，同一输入重跑结果完全一致
 - 跨层对账：购买次数、GMV、漏斗不变量、分时守恒等 6 项月度指标全部通过
 - DQC 质量闸门：ODS/DWD 两层校验，失败即阻断下游调度
-- Airflow 调度与告警：一表一 task，flock 串行闸门保证同一时刻只有一个 SparkSession；4+1 通道任务告警
+- Airflow 调度与告警：一层一 task，层内一个 SparkContext + 一个 Session 逐表串行，flock 串行闸门保证同一时刻只处理一张表；6 通道任务告警
 - 性能基准：Spark 与 StarRocks 双引擎对比（见 `docs/legacy/PERFORMANCE_BENCHMARK.md`）
 
 ## 架构
@@ -34,11 +34,11 @@
                  ┌──────────────────── 2019-Oct / Nov CSV (HDFS) ────────────────────┐
                  ▼
         ┌─────────────────┐
-        │  ODS 层 (1 表)   │  ods_event_log            物理分区，34 个 event_date 分区
+        │  ODS 层 (1 表)   │  ods_event_log            物理分区，61 个 event_date 分区（2019-10-01 ~ 11-30）
         └────────┬────────┘
                  ▼  清洗 / 去重 / 派生列
         ┌─────────────────┐
-        │  DWD 层 (2 表)   │  dwd_event_fact  42,413,557 行 · 13 列
+        │  DWD 层 (2 表)   │  dwd_event_fact  109,806,507 行 · 13 列（2019-10/11 全量）
         │                 │  dwd_event_dirty 脏数据隔离
         └────────┬────────┘
                  ▼
@@ -128,13 +128,16 @@ cp .env.example .env && vim .env
 # 3. 准备源数据（CSV 上传到 HDFS）
 hdfs dfs -put 2019-Oct.csv /home/lst/hadoop-data/eCommerce_behavior/
 
-# 4. 建库建表：5 库 19 张表 + MSCK 注册 ODS 分区
+# 4. ODS 接入（10 月用 ods-bulk 指定源文件；ods-import 默认读 2019-Nov.csv）
+./run.sh ods-bulk --csv hdfs://localhost:8020/home/lst/hadoop-data/eCommerce_behavior/2019-Oct.csv
+
+# 5. 建库建表：5 库 19 张表 + MSCK 注册全部分区表（RFM 快照除外）
 ./run.sh ddl
 
-# 5. 全链路跑通 10 月整月（DWD → DWS → DIM → ADS + 跨层对账）
+# 6. 全链路跑通 10 月整月（DWD → DWS → DIM → ADS + 留存/RFM + 跨层对账）
 ./run.sh build --start 2019-10-01 --end 2019-10-31
 
-# 6. 只做对账（不重新构建）
+# 7. 只做对账（不重新构建）
 ./run.sh check --start 2019-10-01 --end 2019-10-31
 ```
 
@@ -157,7 +160,7 @@ Java / Spark / Hadoop / venv 的位置由 `run.sh` 自动探测，探测不到�
 ./run.sh table etl/ads/ads_trade_daily.py --dt 2019-11-01
 ```
 
-## 数据成果（2019-10-01 ~ 10-31）
+## 数据成果（2019-10 单月，历史）
 
 | 层 | 表数 | 代表表规模 |
 |---|---|---|
@@ -178,7 +181,26 @@ OK 分时守恒 DWS=ADS=DWD明细: PV 42,413,557 / 购买 742,773
 OK 留存不变量（D+n 人数 ≤ D0）: 0 天违规
 ```
 
-业务洞察：
+### 当前 61 天全量（2019-10-01 ~ 11-30）
+
+| 层 | 代表规模 |
+|---|---|
+| DWD | `dwd_event_fact` 109,806,507 行 |
+| DIM | `dim_product_scd2` 222,761 版本 / 206,876 商品；`dim_user` 5,316,649；`dim_session` 23,004,969；`dim_category` 691 |
+| ADS | `ads_user_rfm_snapshot` 707,466 用户（as_of_dt=2019-11-30）；留存 61 天（7 天右删失） |
+
+当前全量对账（2019-10-01 ~ 11-30）：
+
+```
+OK 购买次数守恒 DWD=DWS用户=DWS商品=DWS会话=ADS: 1,680,272
+OK GMV 守恒     DWD=DWS用户=DWS商品=ADS: 511,810,289.17
+OK 漏斗不变量（每日 view_uv 为上游最大值）: 0 天违规
+OK SCD2 每商品单一当前版本: 0 个违规
+OK 分时守恒 DWS=ADS=DWD明细: PV 109,806,507 / 购买 1,680,272
+OK 留存覆盖与不变量: 61/61 天，0 天违规；其中 7 天右删失（NULL）
+```
+
+2019-10 业务洞察：
 
 - RFM 分布符合二八法则：「重要价值客户」占购买用户的 12.2%，贡献 55.6% 的 GMV
 - 留存（基准日 10-16，D0 = 230,199）：D+1 17.68% / D+3 13.20% / D+7 10.74%，单调递减；月末右删失记 NULL 而非 0
@@ -223,8 +245,10 @@ OK 留存不变量（D+n 人数 ≤ D0）: 0 天违规
 │   ├── config.py           # HDFS 路径 / 源 Schema / 业务口径常量 / 连接配置（读环境变量）
 │   └── requirements.txt
 ├── etl/
-│   ├── ddl.py              # 建表 + MSCK
+│   ├── ddl.py              # 建表 + 全分区 MSCK
 │   ├── pipeline.py         # 编排 + 跨层对账
+│   ├── injector.py         # 层内单 Session 注入器（DAG 用）
+│   ├── plans/              # 分层任务清单（inject --plan）
 │   ├── run_locked.sh       # 串行闸门（flock）
 │   ├── utils.py            # get_spark / drop_path / date_range
 │   ├── ods/                # 接入 + 校验
@@ -233,8 +257,8 @@ OK 留存不变量（D+n 人数 ≤ D0）: 0 天违规
 │   ├── dws/                # 4 张汇总表
 │   └── ads/                # 7 张应用表
 ├── scheduler/
-│   ├── incremental_warehouse_dag.py   # Airflow DAG，一表一 task
-│   ├── alerts.py                      # 任务告警（4+1 通道）
+│   ├── incremental_warehouse_dag.py   # Airflow DAG，一层一 task（层内单 Session 串行）
+│   ├── alerts.py                      # 任务告警（6 通道）
 │   └── alert_records/                 # 告警台账（运行时产物，不入库）
 ├── starrocks/               # StarRocks 性能基准与 ADS 导出
 ├── docs/
@@ -253,7 +277,7 @@ OK 留存不变量（D+n 人数 ≤ D0）: 0 天违规
 | [docs/CODE_GUIDE.md](docs/CODE_GUIDE.md) | 代码解析：五层架构、每层实现细节、SCD2 算法、幂等机制、6 个关键设计决策 |
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | 日常操作手册 |
 | [docs/incremental/WAREHOUSE_BUILD.md](docs/incremental/WAREHOUSE_BUILD.md) | 构建记录：19 张表清单、分层依赖、SCD2 设计、对账结果、交叉验证 |
-| [docs/incremental/ALERTS.md](docs/incremental/ALERTS.md) | 告警机制：4+1 通道、事件分级、台账字段 |
+| [docs/incremental/ALERTS.md](docs/incremental/ALERTS.md) | 告警机制：6 通道、事件分级、台账字段 |
 | [docs/legacy/DWS_ADS_TABLES.md](docs/legacy/DWS_ADS_TABLES.md) | DWS/ADS 数据字典（34 天实测数字） |
 | [docs/legacy/PERFORMANCE_BENCHMARK.md](docs/legacy/PERFORMANCE_BENCHMARK.md) | StarRocks vs Spark 查询性能基准 |
 

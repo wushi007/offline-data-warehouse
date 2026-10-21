@@ -163,7 +163,7 @@ def append_json(path, record):
 # 造数
 def gen_data(spark, rows=DEFAULT_ROWS):
     """造一张商品销量明细：1 个爆款 45% + 4 个腰部各 3% + 长尾 43%。"""
-    print(f"🏭 造数：{rows:,} 行，爆款 {HOT_PRODUCT} 占 45%")
+    print(f"造数：{rows:,} 行，爆款 {HOT_PRODUCT} 占 45%")
     base = (spark.range(rows, numPartitions=64)
             .withColumn("r1", F.rand(1)).withColumn("r2", F.rand(2))
             .withColumn("r3", F.rand(3)).withColumn("r4", F.rand(4)))

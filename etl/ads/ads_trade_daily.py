@@ -63,6 +63,8 @@ def check_gmv_volatility(spark, dt, days=DQC_GMV_DAYS,
 
     base = statistics.median([r["gmv"] for r in hist])
     today = spark.sql(f"SELECT gmv FROM {TABLE} WHERE {P} = '{dt}'").collect()[0]["gmv"]
+    if today is None:
+        return True, "今日 GMV 为空（疑似上游漏数）→ 阻断"
     if not base or base <= 0:
         return False, "近 7 日中位数为 0，跳过 GMV 波动校验"
 
@@ -88,7 +90,7 @@ def main():
     days = [args.dt] if args.dt else date_range(args.start, args.end)
     spark = get_spark("ADS_TradeDaily")
     spark.sparkContext.setLogLevel("ERROR")
-    print(f"📈 {TABLE} {len(days)} 天：{days[0]} ~ {days[-1]}")
+    print(f"{TABLE} {len(days)} 天：{days[0]} ~ {days[-1]}")
 
     blocked = []
     for d in days:

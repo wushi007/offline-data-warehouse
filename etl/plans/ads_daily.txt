@@ -1,0 +1,9 @@
+# ADS 日报：5 张单日任务，都读 dws / dwd
+# ads_trade 放第一：它带 GMV 波动阻断（ads_trade_daily.py 的 check_gmv_volatility），
+# 漏数时最早失败，省掉后面 4 张的空跑。
+# 用法：./run.sh inject --plan etl/plans/ads_daily.txt --dt 2019-11-01 --fail-fast
+etl/ads/ads_trade_daily.py              --dt {dt}
+etl/ads/ads_conversion_funnel_daily.py  --dt {dt}
+etl/ads/ads_product_hot_rank_daily.py   --dt {dt}
+etl/ads/ads_session_behavior_daily.py   --dt {dt}
+etl/ads/ads_traffic_hour_daily.py       --dt {dt}

@@ -68,8 +68,10 @@
 
 ```
 etl/
-├── ddl.py            # 建表
+├── ddl.py            # 建表 + 全分区 MSCK
 ├── pipeline.py       # 编排 + 对账
+├── injector.py       # 层内单 Session 注入器（DAG 用）
+├── plans/            # 分层任务清单
 ├── utils.py          # 共享工具
 ├── run_locked.sh     # 串行闸门
 ├── ods/  3 个文件
@@ -520,17 +522,19 @@ df.groupBy("product_id", "category_id", "brand") \
 
 ```python
 STEPS = [
-    ("dwd_event_fact",       "dwd", dwd_event_fact.build),
-    ("dwd_event_dirty",      "dwd", dwd_event_dirty.build),
-    ("dws_user_session",     "dws", dws_user_session_daily.build),
+    {"name": "dwd_event_fact", "layer": "dwd", "mode": "daily", "fn": dwd_event_fact.build},
+    {"name": "dim_product_scd2", "layer": "dim", "mode": "dim_scd2",
+     "inc": dim_scd2_inc, "rebuild": dim_scd2_rebuild},
+    {"name": "ads_user_retention", "layer": "ads", "mode": "range",
+     "fn": ads_user_retention_daily.build_range},
     ...  # 顺序即依赖顺序
 ]
 
+# 区间模式：DIM 全量重算，range 步骤按 [start,end] 跑一次
+# 单日模式：DIM 走增量，range 步骤按 [DATA_START,dt] 跑一次
 spark = get_spark("Pipeline")           # 一个进程一个会话
-for i, (name, layer, fn) in enumerate(wanted, 1):
-    for d in days:
-        fn(spark, d)                    # 复用同一会话
-run_checks(spark, start, end)           # 自动跨层对账
+run_steps(spark, wanted, days, start, end, dt_mode, range_start)
+ok = run_checks(spark, start, end)      # 自动跨层对账，失败返回非 0
 ```
 
 `run_checks()` 检查 6 项不变量：
@@ -542,7 +546,7 @@ run_checks(spark, start, end)           # 自动跨层对账
 | 漏斗不变量 | 每日 `view_uv >= cart_uv` 且 `view_uv >= purchase_uv` |
 | SCD2 单当前版本 | 每商品恰好一个 `dw_is_current=1` |
 | 分时守恒 | DWS = ADS = DWD 明细 PV |
-| 留存不变量 | D+n 人数 ≤ D0 人数 |
+| 留存覆盖与不变量 | 留存表覆盖区间每天，且 D+n 人数 ≤ D0 人数 |
 
 任务成功只说明执行完成，不说明结果正确；跨层守恒检查验证的是业务语义层面的正确性。
 
@@ -584,7 +588,7 @@ SparkSession，跨 DAG、跨手动执行均生效。抢不到锁的任务排队�
 | `airflow_env.sh` | 配置入口（唯一） | 生成 Variable `warehouse_env`（自动回读校验）+ `airflow-env.sh`；`--show` 只读查看 |
 | `check_env.sh` | DAG 的环境守卫脚本 | 由 DAG 替换占位符后执行，不嵌在 Python 里 |
 | `incremental_warehouse_dag.py` | 编排定义（TaskFlow API） | `@dag` / `@task`；只写"怎么编排"，不写路径常量 |
-| `alerts.py` | 失败/重试告警 | 4+1 通道，见 [incremental/ALERTS.md](incremental/ALERTS.md) |
+| `alerts.py` | 失败/重试告警 | 6 通道，见 [incremental/ALERTS.md](incremental/ALERTS.md) |
 
 写法：TaskFlow API（`@task`）+ 独立子进程
 
@@ -592,18 +596,19 @@ SparkSession，跨 DAG、跨手动执行均生效。抢不到锁的任务排队�
 from airflow.sdk import dag, task          # Airflow 3 推荐路径
                                            # （airflow.decorators 已废弃）
 
-@task(**_step_options("ods_import"))
-def ods_import(ds=None, upstream=None):    # ds 由 Airflow 自动注入；upstream = 上游依赖
-    return _run_step("ods_import", ds)     # 内部 subprocess 跑 etl/run_locked.sh
+@task(**_layer_options("ods"))
+def ods_layer(ds=None, upstream=None):     # ds 由 Airflow 自动注入；upstream = 上游依赖
+    return _run_layer("ods", ds)           # 子进程内：一个 Context + 一个 Session，逐表串行
 ```
 
 采用 `@task` + subprocess 而不把 ETL 逻辑搬进函数的原因：
 
 > 宿主 16G 内存被 WSL2 限制为约 7.6G，HDFS、MySQL、Airflow 常驻约 2.5G，
-> 必须保证同一时刻只有一个 SparkSession（JVM 运行结束后释放）。
-> 如果把 21 张表写成一个进程里的 Python 函数，SparkSession 会累积，
-> 最终被内核 OOM killer 终止。因此 `@task` 只负责编排、传参、重试、超时和告警，
-> 计算仍交给 `etl/run_locked.sh`（内含 `flock` 串行闸门）这个独立子进程。
+> 必须保证同一时刻只有一张表、一个 SparkSession 在跑。
+> `@task` 只负责编排、传参、重试、超时和告警，计算仍交给
+> `etl/run_locked.sh`（内含 `flock` 串行闸门）拉起的一个独立子进程。
+> 每层一个子进程、一个 Context、一个 Session；层内逐表串行复用，
+> 脚本里的 `spark.stop()` 被 injector 拦截，不再逐表重启 Session。
 
 配置优先级链（高 → 低）：`os.environ` → Airflow Variable `warehouse_env` → 代码默认值。
 
@@ -617,8 +622,8 @@ def _cfg(key, default=None):
 
 Airflow Variable 存储在元数据库中，DAG 进程加载时读取一次，配置因此不进入代码。
 官方文档在 Variables 一节建议把可变参数放在 Variable 中，而不是写死在 DAG 里。
-超时表、告警分级名单这类策略参数也一并放入了 Variable：
-`timeout_overrides_min` / `quality_tasks` / `quality_warn_tasks`。
+按层超时和告警分级名单这类策略参数也可以放入 Variable：
+`<layer>_timeout_min`（如 `dim_timeout_min`）/ `quality_tasks` / `quality_warn_tasks`。
 
 > 导入格式必须保留外层 key。
 >
@@ -654,16 +659,19 @@ p = subprocess.run(cmd, env={**os.environ, **TASK_ENV}, capture_output=True, tex
 > 既保留 `HOME`/`PATH` 等系统变量，也让 Spark/JDK 路径覆盖任何同名变量。
 
 其余编排要点：
-- 一表一 task（20 张表 + `check_env` = 21 个 task），`max_active_tasks=1` 配合 `etl/run_locked.sh` 的 flock 双保险
-- TaskFlow 的依赖通过函数签名表达：`def dwd_event_fact_dqc(fact=None, dirty=None)` 声明
-  它等待 `fact` / `dirty` 两个上游；调用处 `dwd_event_fact_dqc(fact=dwd_event_fact(...), dirty=...)`
-  决定连接关系。参数个数等于上游个数，多传一个位置参数会直接报
-  `TypeError: too many positional arguments`。
+- 一层一 task（6 层 + `check_env` = 7 个 task），层内一个 SparkContext + 一个 Session，
+  各表按清单顺序串行执行（同一时刻只处理一张表）；`max_active_tasks=1` 配合
+  `etl/run_locked.sh` 的 flock 双保险
+- 层内不再逐表 `newSession()`，也不调用 `spark.stop()`：脚本里的 `spark.stop()`
+  被 injector 拦截为 no-op，下一个脚本继续复用同一个 Session / Context
+- 层内依赖由 injector 清单顺序决定：dwd 层按 `fact → dirty → dqc` 排列，
+  dqc 必须最后（账对平需要事实表与脏表都写完）
 - `ds` 是保留参数名：函数签名里写 `ds=None`，Airflow 运行时自动注入当前逻辑日期
   （等价于旧版的 `{{ ds }}`，但它是字符串，不需要 `{{{{ }}}}` 转义）。
-- `schedule="@daily"` + `end_date=DATA_END`，不能用 `schedule=None`（Airflow 3 的 backfill 拒绝 NullTimetable）
+- 当前 `schedule="@daily"` + `end_date=DATA_END`（2019-11-30）：调度器不会产生新 run，实际靠手动 trigger/backfill；
+  若要纯手动运行，可改为 `schedule=None`
 - 区间型任务（`RANGE_TASKS`）传 `--start DATA_START --end <ds>`，其余传 `--dt <ds>`
-  （`_run_step()` 里按 `RANGE_TASKS` 分支拼参数）
+  （`_plan_text()` 里按 `RANGE_TASKS` 分支拼参数）
 
 ### `scheduler/alerts.py`
 
