@@ -1,0 +1,29 @@
+{
+  "sample": "events.csv",
+  "range": [
+    "2019-10-01",
+    "2019-10-08"
+  ],
+  "spark": "3.5.8",
+  "tables": 19,
+  "checks": {
+    "cross_layer": true,
+    "ods_37": true,
+    "dwd_32": true,
+    "dirty_3": true,
+    "purchases_12_gmv_120": true,
+    "scd2_change": true,
+    "retention_right_censoring": true,
+    "retention_day1": true,
+    "rfm_snapshot": true,
+    "short_window_null": true,
+    "all_tables_rerun_identical": true,
+    "scd2_same_day_idempotent": true,
+    "scd2_backfill_rejected": true,
+    "missing_input_rejected": true
+  },
+  "passed": true,
+  "date": "2026-10-27",
+  "command": "bash examples/warehouse/run.sh --verify-rerun",
+  "note": "37条合成事件，本地Hive；不代表全量数据性能"
+}

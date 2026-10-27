@@ -4,12 +4,12 @@
 
 集中管理 HDFS 路径、源数据 Schema 与业务口径常量。
 
-新表口径与 my_second_project 旧表对齐，可拼接使用（旧=2019-10，新=2019-11）：
 分区列统一 event_date；event_type 四类枚举 view/cart/remove_from_cart/purchase；
 去重键为 (user_id, event_time, product_id, event_type)。
 """
 
 import os
+import re
 
 from pyspark.sql.types import (
     StructType, StructField, TimestampType, StringType,
@@ -17,11 +17,11 @@ from pyspark.sql.types import (
 )
 
 # ---------------- HDFS 路径 ----------------
-HDFS_ROOT = "hdfs://localhost:8020"
-WAREHOUSE = f"{HDFS_ROOT}/home/warehouse/hadoop-data/warehouse"
+HDFS_ROOT = os.environ.get("DW_FS_URI", "hdfs://localhost:8020")
+WAREHOUSE = os.environ.get("DW_WAREHOUSE_URI", f"{HDFS_ROOT}/warehouse/ecommerce").rstrip("/")
 
 # 源数据（已上传 HDFS 的 2019-11 行为日志）
-SRC_CSV_2019NOV = f"{HDFS_ROOT}/home/warehouse/hadoop-data/eCommerce_behavior/2019-Nov.csv"
+SRC_CSV_2019NOV = os.environ.get("DW_SOURCE_CSV", f"{HDFS_ROOT}/data/ecommerce/2019-Nov.csv")
 
 # ODS / DWD（分区: event_date）
 ODS_PATH = f"{WAREHOUSE}/ods_event_log"
@@ -57,17 +57,20 @@ ADS = {
 }
 
 DBS = {
-    "ods": "ods",
-    "dwd": "dwd",
-    "dim": "dim",
-    "dws": "dws",
-    "ads": "ads",
+    "ods": os.environ.get("DW_DB_PREFIX", "") + "ods",
+    "dwd": os.environ.get("DW_DB_PREFIX", "") + "dwd",
+    "dim": os.environ.get("DW_DB_PREFIX", "") + "dim",
+    "dws": os.environ.get("DW_DB_PREFIX", "") + "dws",
+    "ads": os.environ.get("DW_DB_PREFIX", "") + "ads",
 }
+
+if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", db) for db in DBS.values()):
+    raise ValueError("DW_DB_PREFIX 必须组成有效的 SQL 标识符")
 
 PARTITION_COL = "event_date"       # 全链路统一分区列（dim_* 为全量表、RFM 用 as_of_dt）
 
-DATA_START = "2019-10-01"
-DATA_END = "2019-10-31"
+DATA_START = os.environ.get("DW_DATA_START", "2019-10-01")
+DATA_END = os.environ.get("DW_DATA_END", "2019-10-31")
 
 FACT_COLUMNS = [
     "event_time", "event_type", "behavior_type", "product_id",

@@ -20,7 +20,7 @@ from config.config import (  # noqa: E402
     DIM_SESSION_PATH, DIM_USER_PATH, DWD_DIRTY_PATH, DWD_FACT_PATH, DWS,
     ODS_PATH,
 )
-from utils import get_spark  # noqa: E402
+from etl.utils import get_spark  # noqa: E402
 
 
 def ddl_statements():
@@ -342,6 +342,7 @@ def create_all(spark, drop=False, drop_tables=None):
     create_databases(spark)
     targets = set(drop_tables or [])
     for db, tbl, ddl in ddl_statements():
+        db = DBS[db]
         if drop or f"{db}.{tbl}" in targets:
             spark.sql(f"DROP TABLE IF EXISTS {db}.{tbl}")
         spark.sql(ddl)
@@ -362,6 +363,7 @@ def repair_partitions(spark, stmts):
         if (db, tbl) in SKIP_MSCK:
             print(f"  (跳过) {db}.{tbl}：快照表由脚本自行维护分区")
             continue
+        db = DBS[db]
         try:
             spark.sql(f"MSCK REPAIR TABLE {db}.{tbl}")
             count += 1

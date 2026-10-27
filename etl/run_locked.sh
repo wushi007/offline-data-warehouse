@@ -11,11 +11,7 @@ set -euo pipefail
 
 # 敏感配置统一来自项目根目录 .env
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [ -f "$REPO_ROOT/.env" ]; then
-    set -a
-    . "$REPO_ROOT/.env"
-    set +a
-fi
+source "$REPO_ROOT/scripts/env.sh"
 
 LOCK="${SPARK_LOCK:-/tmp/my-spark-warehouse.lock}"
 WAIT="${SPARK_LOCK_WAIT:-7200}"

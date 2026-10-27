@@ -1,3 +1,5 @@
+> 当前路径通过 .env 的 DW_FS_URI、DW_WAREHOUSE_URI、DW_SOURCE_CSV 配置；以下 /home/warehouse 示例是已有本机环境，请替换为自己的路径。可选依赖见 [依赖说明](../requirements/README.md)。
+
 # 从零跑通：配置到运行
 
 > 本文描述从环境准备到产出数据的完整流程。
@@ -51,7 +53,7 @@
 | 同一时刻一个 SparkSession | `etl/run_locked.sh` 的 `flock` 闸门 | 两个作业并存会 OOM |
 | 调度并发 = 1 | `max_active_tasks=1` + `max_active_runs=1` | 与闸门共同保证串行 |
 
-> 路径（如 `/home/warehouse/hadoop-data/warehouse`）集中在 `config/config.py`，换机器时修改该文件即可。内存相关取值可按新机器的可用内存调整。
+> 路径通过 `.env` 的 `DW_FS_URI`、`DW_WAREHOUSE_URI`、`DW_SOURCE_CSV` 设置。内存相关取值按实际可用资源调整。
 
 ---
 
@@ -65,17 +67,9 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-`requirements.txt` 的内容：
-
-```
-pyspark==3.5.8      # 核心
-pandas / numpy      # 数据处理
-matplotlib / streamlit / altair   # 可视化
-pymysql             # StarRocks / MySQL 连接
-networkx
-```
-
-> Airflow 依赖不在此文件中，它安装在独立的 `airflow-venv`，以避免与 Spark 依赖冲突。
+`requirements.txt` 只安装核心 PySpark。运行台使用 `requirements/monitoring.txt`，
+StarRocks 使用 `requirements/starrocks.txt`。Airflow 安装在独立环境，具体版本与安装命令见
+[依赖说明](../requirements/README.md)。
 
 ### 2. 确认 Java
 
@@ -382,7 +376,8 @@ SELECT * FROM dim.dim_product_scd2 WHERE product_id = 1004856;
 -- 查某天的口径
 SELECT * FROM dim.dim_product_scd2
 WHERE product_id = 1004856
-  AND DATE '2019-10-20' BETWEEN dw_start_date AND dw_end_date;
+  AND DATE '2019-10-20' >= dw_start_date
+  AND DATE '2019-10-20' < dw_end_date;
 
 -- 取当前口径
 SELECT * FROM dim.dim_product_scd2

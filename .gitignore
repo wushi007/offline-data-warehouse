@@ -81,3 +81,22 @@ scheduler/notifiers.py
 
 # 基准结果保留（体积小，作为性能对比证据）
 !starrocks/bench_results/*.json
+
+.airflow-venv/
+
+# 本地测试、验收草稿和整理笔记不随正式代码发布
+/tests/
+/docs/review/
+/docs/validation/
+/docs/SQL_ERROR_LEARNING.md
+/docs/architecture.md
+/docs/data-model.md
+/docs/operations.md
+/scripts/demo.py
+/scripts/demo.sh
+/scripts/test.sh
+/monitoring/test_*.py
+/.github/workflows/checks.yml
+
+# 小型合成样例随代码发布
+!examples/warehouse/events.csv
