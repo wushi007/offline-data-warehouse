@@ -6,7 +6,7 @@
 主链路由 Spark 计算、Hive 外部表管理、Airflow 调度。另有一个运行台，用来集中查看每次任务的状态、重试和 SQL 报错。
 已有全量运行记录包含 **61 个日分区、109,806,507 条 DWD 事实数据**；这是单机项目，不是生产集群。
 
-阅读顺序：[数据流转](#数据怎么流转) → [运行方法](#怎么运行) → [结果](#已经跑出的结果) → [错误定位](#任务失败后怎么看)。
+阅读顺序：[数据流转](#数据怎么流转) → [运行方法](#怎么运行) → [结果](#已经跑出的结果) → [业务看板](#交易与转化看板) → [错误定位](#任务失败后怎么看)。
 
 ## 数据怎么流转
 
@@ -191,6 +191,19 @@ OK 留存不变量（D+n 人数 ≤ D0）: 0 天违规
 
 </details>
 
+## 交易与转化看板
+
+将 ADS 交易日报和漏斗日报导出后，可以直接查看 GMV、平均购买金额、转化率趋势和单日漏斗。
+支持切换 10 月/11 月、自定义日期范围，以及点击趋势图联动单日漏斗。
+
+![交易与转化日报看板：GMV、转化率趋势和单日漏斗](docs/assets/trade-funnel-dashboard.png)
+
+**[下载看板 HTML](https://github.com/wushi007/offline-data-warehouse/raw/refs/heads/main/dashboards/trade_funnel_dashboard.html)**，保存后用浏览器打开。图表和数据都在文件中，离线可用，不需要连接 StarRocks；GitHub 文件页只显示源码。
+
+看板使用 2019-10-01～11-30 的 61 天导出快照，金额与购买次数和上面的全量记录一致，不会实时刷新。
+其中“购买事件数”不是业务系统的独立订单数；每天的 UV 各自去重，区间累加为人次，漏斗比例也不等于同一批用户的完整转化路径。
+具体口径见 [看板说明](dashboards/README.md)。
+
 ## 任务失败后怎么看
 
 通过 Airflow 运行时，进入 DAG → 运行批次 → 失败的层任务 → Logs。
@@ -242,6 +255,7 @@ Spark 参数模板见 [conf/spark-env.sh.example](conf/spark-env.sh.example)。�
 | [etl/](etl/) | 五层 ETL；ddl.py 建表，pipeline.py 编排和对账 |
 | [scheduler/](scheduler/) | 正式 Airflow DAG、质量阻断和告警 |
 | [monitoring/](monitoring/) | 任务记录、SQL 异常提取和查看页 |
+| [dashboards/](dashboards/) | 可离线打开的交易与转化看板 |
 | [examples/](examples/) | 可运行的五层小样例和 SQL 故障样例 |
 | [requirements/](requirements/) | 核心与可选组件的安装清单 |
 | [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) | 环境准备、正式数据运行、常见报错 |
