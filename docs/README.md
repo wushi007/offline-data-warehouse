@@ -1,14 +1,58 @@
-# 文档入口
+# 文档索引
 
-当前使用路径：
+本目录按两代实现分成两个文件夹。阅读任何一篇前，先确认它讲的是哪一代。
 
-1. [从小样本开始](GETTING_STARTED.md)：安装、测试、真实链路演示。
-2. [架构与边界](architecture.md)：手动/调度运行方式、为什么按层串行。
-3. [数据模型](data-model.md)：表粒度、指标口径、拉链与留存限制。
-4. [运行手册](operations.md)：正式 HDFS 环境、Airflow、任务诊断。
-5. [验证记录](validation/README.md)：本轮样本验收与历史全量结果的区别。
-6. [开发与发布](WORKFLOW.md)：分支、检查与 GitHub 发布。
+```
+docs/
+├── README.md          ← 本文件：索引 + 两代的区别
+├── GETTING_STARTED.md ← 从零跑通：环境配置 → 建表 → 跑数 → 验证
+├── CODE_GUIDE.md      ← 代码解析：架构、各层实现、关键设计决策
+├── WORKFLOW.md        ← 日常操作手册（改代码 / 跑任务 / 推送）
+├── incremental/       本次建设（增量数仓：Spark + Airflow，2019-10/11）
+└── legacy/            旧实现（批量数仓：Spark + StarRocks，2019-10/11）
+```
 
-补充材料：[详细代码解析](CODE_GUIDE.md)、[告警](incremental/ALERTS.md)、[SQL 故障示例](SQL_ERROR_LEARNING.md)。
+## 先读这两篇
 
-历史建设过程保留在 incremental/；早期表说明与性能记录保留在 legacy/。其中的数据范围和命令可能反映当时状态，不作为当前启动入口。最新表结构以 etl/ddl.py 为准。
+| 文档 | 什么时候看 |
+|---|---|
+| [GETTING_STARTED.md](GETTING_STARTED.md) | 第一次拿到代码：环境准备、依赖安装、改配置、建表、跑通、查结果、常见报错 |
+| [CODE_GUIDE.md](CODE_GUIDE.md) | 需要了解代码：五层架构、各层职责、SCD2 算法、幂等机制、关键设计取舍 |
+
+## 其余文档
+
+| 文档 | 内容 |
+|---|---|
+| [WORKFLOW.md](WORKFLOW.md) | 日常操作：三个路径的分工、提交推送流程、跑任务的命令、环境启停 |
+
+## 怎么区分两代实现
+
+| | `incremental/`（本次，2026-09-29 起） | `legacy/`（旧，2026-08 及更早） |
+|---|---|---|
+| 代码 | `etl/` 下一表一文件、每层一个文件夹 | 多张表集中在一个脚本里（如 `build_dims.py`、`dws_aggregate.py`），这些文件已被删除或取代 |
+| 调度 | Airflow（`scheduler/incremental_warehouse_dag.py`，一层一 task，层内单 Session 串行） | 手动 / `run.sh` |
+| 引擎 | Spark（HDFS + Hive metastore） | Spark + StarRocks 双引擎 |
+| 存储 | Hive 外部表，19 张（5 层） | 部分表随 2026-09-29 数仓清空被 DROP |
+| 数据区间 | 2019-10-01 ~ 2019-11-30（各次结果按窗口区分） | 2019-10-01 ~ 2019-11-03（34 天） |
+
+`legacy/` 里的文档仍有参考价值：它记录了被删实现的历史数字，本次重建用它做交叉验证
+（11-01/02/03 的 GMV 逐项对得上）。其中代码路径引用大多已失效，不要按文档中的路径查找文件。
+
+## `incremental/` —— 本次建设
+
+| 文档 | 内容 |
+|---|---|
+| [WAREHOUSE_BUILD.md](incremental/WAREHOUSE_BUILD.md) | 建设过程与结果：19 张表清单、分层依赖、SCD2 设计、幂等机制、跨层对账、与旧文档的交叉验证、常用命令 |
+| [ALERTS.md](incremental/ALERTS.md) | 任务告警机制：6 通道、事件分级、触发点、台账字段与样例、手机推送配置、已知局限 |
+
+## `legacy/` —— 旧实现
+
+| 文档 | 内容 | 注意 |
+|---|---|---|
+| [DWS_ADS_TABLES.md](legacy/DWS_ADS_TABLES.md) | DWS/ADS 层数据字典（34 天实测数字） | 表结构口径沿用至今；代码路径已失效 |
+| [PERFORMANCE_BENCHMARK.md](legacy/PERFORMANCE_BENCHMARK.md) | StarRocks vs Spark 查询性能基准 | 依赖已停的 StarRocks |
+
+## 不在本目录的相关材料
+
+本仓库的文档只包含 `docs/` 下的这些。开发环境的其他文档属于本地环境，不随本项目分发，
+未纳入整理。

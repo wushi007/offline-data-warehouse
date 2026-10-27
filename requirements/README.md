@@ -1,7 +1,7 @@
 # 依赖与环境
 
-展示基线：Python 3.10、JDK 17、pip PySpark 3.5.8；Airflow 3.3.0 独立运行。
-已有全量环境使用外部 Spark 3.5.9 + Python PySpark 3.5.8，保留兼容，不作为可移植演示基线。
+当前版本：Python 3.10、JDK 17、pip PySpark 3.5.8；Airflow 3.3.0 独立运行。
+已有全量环境使用外部 Spark 3.5.9 + Python PySpark 3.5.8，保留现有配置。
 
 ```bash
 python3.10 -m venv .venv
@@ -22,5 +22,5 @@ python3.10 -m venv .airflow-venv
 
 Airflow 的 PyMySQL 使用官方 constraints 指定版本（当前为 1.1.3），不与项目可选 StarRocks 环境的版本混用。不要使用 --no-deps 绕过冲突。
 核心和可选组件固定直接依赖版本，传递依赖由包/官方 constraints 解析；这不是全平台锁文件。
-CI 每次从干净环境安装核心依赖并执行小样本验证。不要将共享开发环境的 pip freeze 覆盖到项目清单。
+不要将共享开发环境的 pip freeze 覆盖到项目清单。
 Java/HDFS/MySQL 属于系统组件，不放入 pip requirements。

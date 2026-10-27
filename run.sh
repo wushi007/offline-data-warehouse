@@ -79,8 +79,7 @@ usage() {
     cat <<'EOF'
 用法: ./run.sh <命令> [参数]
 
-本地验证
-  demo [--verify-rerun]        隔离样本跑真实五层 ETL，不需要 HDFS/Airflow
+环境检查
   doctor                       检查核心版本和 Java
 
 建表 / 调度
@@ -116,7 +115,6 @@ EOF
 }
 
 case "${1:-}" in
-    demo)       exec bash ./scripts/demo.sh "${@:2}" ;;
     doctor)     exec "$PY" scripts/doctor.py ;;
     ddl)        run etl/ddl.py "${@:2}" ;;
     backfill)   run etl/backfill.py "${@:2}" ;;

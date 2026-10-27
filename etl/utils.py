@@ -18,7 +18,7 @@ def get_spark(app_name="WarehouseTask", memory=None, shuffle_partitions=100):
     """
     memory = memory or os.environ.get("SPARK_DRIVER_MEMORY", "1g")
     from pyspark.sql import SparkSession
-    builder = (
+    return (
         SparkSession.builder
         .master(os.environ.get("SPARK_MASTER", "spark://localhost:7077"))
         .appName(app_name)
@@ -36,16 +36,8 @@ def get_spark(app_name="WarehouseTask", memory=None, shuffle_partitions=100):
         .config("spark.sql.shuffle.partitions", str(shuffle_partitions))
         .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
         .config("spark.ui.showConsoleProgress", "false")
+        .getOrCreate()
     )
-    if os.environ.get("DW_LOCAL_DEMO") == "1":
-        root = Path(os.environ["DW_DEMO_ROOT"]).resolve()
-        builder = (builder.config("spark.sql.warehouse.dir", (root / "managed").as_uri())
-                   .config("spark.hadoop.javax.jdo.option.ConnectionURL",
-                           f"jdbc:derby:;databaseName={root / 'metastore'};create=true")
-                   .config("spark.hadoop.hive.metastore.uris", "")
-                   .config("spark.eventLog.enabled", "false")
-                   .enableHiveSupport())
-    return builder.getOrCreate()
 
 
 def drop_path(spark, path, keep_dir=True):
