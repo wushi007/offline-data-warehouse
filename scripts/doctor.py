@@ -24,9 +24,9 @@ def main():
         print('Java：'+(result.stderr or result.stdout).splitlines()[0])
     else:
         missing.append('Java');print('Java：未找到，请安装 JDK17')
-    print('核心演示：bash scripts/demo.sh --verify-rerun')
-    print('SPARK_HOME：'+os.environ.get('SPARK_HOME','未设置（演示使用 pip Spark）'))
-    print('Airflow：独立环境，按 docs/operations.md 配置；核心演示不需要它')
+    print('正式运行入口：./run.sh；配置方法见 docs/GETTING_STARTED.md')
+    print('SPARK_HOME：'+os.environ.get('SPARK_HOME','未设置，请按正式环境配置 Spark'))
+    print('Airflow：独立环境，安装命令见 requirements/README.md')
     return int(bool(missing))
 
 

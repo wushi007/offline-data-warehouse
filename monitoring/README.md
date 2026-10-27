@@ -19,11 +19,10 @@ bash monitoring/stop.sh
 
 ## 怎么看
 
-1. 在 DAG 筛选中选 `sql_error_learning_demo`。
-2. 搜索 `learn_three_tasks_fail_20261027`。
-3. 点击 `transform_orders` 记录的“查看详情”，在右侧查看 SQL 错误详情、脚本位置、SQL 行列和完整异常。
-4. 搜索 `learn_three_tasks_success_20261027`，对比三个成功任务。
-5. 在“错误范围”中选“仅语法错误”或“包含 SQL 错误”。
+1. 选择需要查看的 DAG，例如 `incremental_warehouse_dag`。
+2. 按状态筛选失败任务，或搜索运行批次、任务名、错误码。
+3. 点击记录的“查看详情”，在右侧查看 SQL 错误、脚本位置和完整日志。
+4. 若未提取到 SQL 错误，切换到“完整任务日志”检查其它失败原因。
 
 每行是一条任务尝试，以 DAG、run_id、task_id、map_index、attempt 唯一标识。
 重试单独保留；尚未执行的任务可能显示 attempt=0。

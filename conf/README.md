@@ -1,6 +1,6 @@
 # 正式环境配置模板
 
-小样本 demo 不读取这些文件。正式 HDFS/Hive 模式需将对应内容配置到你自己的 Spark 安装，不要复制本机用户名路径。
+正式 HDFS/Hive 模式需将对应内容配置到你自己的 Spark 安装，不要复制本机用户名路径。
 
 `$SPARK_HOME/conf/spark-defaults.conf` 最小示意：
 
