@@ -56,7 +56,7 @@ def two_stage(salted):
 
 
 def run_naive(spark, df):
-    """基线：直接 GROUP BY。热点 key 的 2250 万行全部落到同一个 reduce task。"""
+    """基线：直接 GROUP BY。热点原始行会先经历 partial aggregate，需依据 shuffle 指标判断 reduce 热点。"""
     agg = df.groupBy("product_id").agg(*aggs())
     return measure(spark, "A. 原始 groupBy（复现倾斜）", lambda: len(agg.collect()))
 
@@ -65,7 +65,7 @@ def run_salted_all(spark, df):
     """全量加盐，反例。
 
     所有 key 都加 64 个盐桶：40 万个长尾商品（各约几十行）的中间结果
-    从 40 万组膨胀到 2560 万组，热点被拆散但整体反而慢 3.3×。
+    可能膨胀，具体数量需测量；历史样本总耗时更长。
     """
     salted = df.withColumn("salt", (F.rand(7) * SALT_N).cast("int"))
     return measure(spark, f"B. 全量加盐（{SALT_N} 桶 × 全部 key）",

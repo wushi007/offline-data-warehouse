@@ -5,11 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # 敏感配置统一来自项目根目录 .env
-if [ -f .env ]; then
-    set -a
-    . ./.env
-    set +a
-fi
+source ./scripts/env.sh
 
 # JDK 17：环境变量优先；未设置时用 Debian/Ubuntu 的默认位置
 if [ -z "${JAVA_HOME:-}" ]; then
@@ -83,6 +79,10 @@ usage() {
     cat <<'EOF'
 用法: ./run.sh <命令> [参数]
 
+本地验证
+  demo [--verify-rerun]        隔离样本跑真实五层 ETL，不需要 HDFS/Airflow
+  doctor                       检查核心版本和 Java
+
 建表 / 调度
   ddl                         建全链路库表（5 库 19 张）+ MSCK 注册全部分区表（RFM 快照除外）
   ddl --drop-tables dim.dim_user   只重建指定表（改 schema 时用，自动 MSCK）
@@ -116,6 +116,8 @@ EOF
 }
 
 case "${1:-}" in
+    demo)       exec bash ./scripts/demo.sh "${@:2}" ;;
+    doctor)     exec "$PY" scripts/doctor.py ;;
     ddl)        run etl/ddl.py "${@:2}" ;;
     backfill)   run etl/backfill.py "${@:2}" ;;
     ods-import) run etl/ods/ods_event_log.py "${@:2}" ;;

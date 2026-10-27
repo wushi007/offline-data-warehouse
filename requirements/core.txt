@@ -1,0 +1,2 @@
+# 演示基线使用 pip PySpark 自带的 Spark 运行时，不依赖外部 Spark 安装。
+pyspark==3.5.8

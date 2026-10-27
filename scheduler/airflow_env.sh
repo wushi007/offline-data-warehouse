@@ -9,11 +9,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # 敏感配置统一来自项目根目录 .env（不入库）
-if [ -f "$REPO_ROOT/.env" ]; then
-    set -a
-    . "$REPO_ROOT/.env"
-    set +a
-fi
+source "$REPO_ROOT/scripts/env.sh"
 AIRFLOW_HOME="${AIRFLOW_HOME:-$HOME/my-spark/airflow}"
 AIRFLOW_VENV="${AIRFLOW_VENV:-$HOME/my-spark/airflow-venv}"
 
@@ -98,11 +94,7 @@ gen_env_file() {
 # 由 scheduler/airflow_env.sh 生成，勿手工编辑；环境变量优先于 airflow.cfg（升级会重写）。
 
 # 敏感配置统一来自项目根目录 .env
-if [ -f "$REPO_ROOT/.env" ]; then
-    set -a
-    . "$REPO_ROOT/.env"
-    set +a
-fi
+source "$REPO_ROOT/scripts/env.sh"
 
 export AIRFLOW_HOME=$AIRFLOW_HOME
 

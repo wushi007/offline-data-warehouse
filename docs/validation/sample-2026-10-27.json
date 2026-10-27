@@ -1,0 +1,34 @@
+{
+  "sample": "events.csv",
+  "range": [
+    "2019-10-01",
+    "2019-10-08"
+  ],
+  "spark": "3.5.8",
+  "tables": 19,
+  "checks": {
+    "cross_layer": true,
+    "ods_37": true,
+    "dwd_32": true,
+    "dirty_3": true,
+    "purchases_12_gmv_120": true,
+    "scd2_change": true,
+    "retention_right_censoring": true,
+    "retention_day1": true,
+    "rfm_snapshot": true,
+    "short_window_null": true,
+    "all_tables_rerun_identical": true,
+    "scd2_same_day_idempotent": true,
+    "scd2_backfill_rejected": true,
+    "missing_input_rejected": true
+  },
+  "passed": true,
+  "python": "3.10.12",
+  "java": "17",
+  "command": "PYTHON=/tmp/ecom-showcase-clean-venv/bin/python bash scripts/demo.sh --verify-rerun",
+  "environment": "新建 venv，仅安装 requirements.txt；未加载本机 .env 或外部 Spark 配置",
+  "date": "2026-10-27",
+  "base_commit": "726784c",
+  "working_branch": "chore/showcase-readiness",
+  "revision_note": "本报告对应展示整理分支；具体版本见本文件的 Git 提交历史"
+}
