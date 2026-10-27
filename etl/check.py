@@ -1,16 +1,17 @@
-import argparse
-import sys
+"""兼容旧诊断入口；跨层对账请使用 ./run.sh check。"""
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from etl.utils import get_spark
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config.config import HDFS_ROOT, SRC_CSV_2019NOV, SRC_SCHEMA, ODS_PATH  # noqa: E402
-from utils import get_spark, hdfs_partition_count
+def main():
+    spark = get_spark("Warehouse_Tables")
+    try:
+        spark.sql("SHOW TABLES IN default").show()
+    finally:
+        spark.stop()
 
-spark = get_spark()
-spark.sparkContext.setLogLevel("ERROR")
-spark.sql("USE default")
-df = spark.sql("SHOW TABLES")
-df.show()
 
-spark.stop()
+if __name__ == "__main__":
+    main()

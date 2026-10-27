@@ -1,0 +1,3 @@
+# 使用 requirements/README.md 中的官方 constraints 安装，独立环境。
+apache-airflow==3.3.0
+PyMySQL

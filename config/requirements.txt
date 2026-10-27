@@ -1,8 +1,2 @@
-# 运行时依赖（安装：/home/warehouse/my-spark/.venv/bin/pip install -r requirements.txt）
-pyspark==3.5.8
-pandas
-numpy
-matplotlib
-streamlit
-altair
-networkx
+# 兼容旧安装命令。唯一核心清单位于 requirements/core.txt。
+-r ../requirements/core.txt
