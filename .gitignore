@@ -84,12 +84,10 @@ scheduler/notifiers.py
 
 .airflow-venv/
 
-# 本地验收、学习案例与整理笔记不随正式代码发布
+# 本地测试、验收草稿和整理笔记不随正式代码发布
 /tests/
-/examples/
 /docs/review/
 /docs/validation/
-/docs/assets/
 /docs/SQL_ERROR_LEARNING.md
 /docs/architecture.md
 /docs/data-model.md
@@ -99,3 +97,6 @@ scheduler/notifiers.py
 /scripts/test.sh
 /monitoring/test_*.py
 /.github/workflows/checks.yml
+
+# 小型合成样例随代码发布
+!examples/warehouse/events.csv
