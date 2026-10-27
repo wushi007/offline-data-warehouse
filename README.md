@@ -1,5 +1,13 @@
 # 电商离线数仓（Spark + Hive + Airflow）
 
+> **数据错误声明**
+> 本项目全部指标基于 Kaggle 公开数据集（2019-Oct / 2019-Nov），源数据本身存在采集缺失和语义异常，**结果只用于演示，不能当作真实业务结论**：
+> - `purchase` 事件在 11-14 ~ 11-17 连续缺失小时，11-15 全天 0 条（同期 `view` / `cart` 覆盖完整）；
+> - 11-14 ~ 11-17 的 UV 与行为分布突变，`view` / `cart` / `purchase` 放大幅度不一致（3.13× / 5.96× / 8.10×）；
+> - 源数据自带漏斗倒挂（61 天中 22 天 `purchase_uv > cart_uv`）、`price = 0` 的购买、当日无浏览的购买。
+>
+> 以上属于源数据特征或采集缺失，不是 ETL 计算错误；观测方法与证据见下文「源数据质量观察（61 天）」。
+
 这个项目把电商的浏览、加购、购买日志，整理成可以直接查询的交易、用户、商品和留存指标。
 数据来自 [Kaggle eCommerce behavior](https://www.kaggle.com/datasets/mkechinov/ecommerce-behavior-data-from-multi-category-store)，覆盖 2019 年 10–11 月。
 
