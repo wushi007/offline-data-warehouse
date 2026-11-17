@@ -1,6 +1,6 @@
 # 电商分析看板
 
-[下载 HTML](https://github.com/wushi007/offline-data-warehouse/raw/refs/heads/main/dashboards/trade_funnel_dashboard.html)，保存后用浏览器打开即可。
+[下载 HTML](https://github.com/wushi007/offline-data-warehouse/raw/refs/heads/main/dashboards/ecommerce_dashboard.html)，保存后用浏览器打开即可。
 GitHub 文件页展示的是源代码，不会直接运行 HTML。
 
 单文件离线看板，图表库、字体和汇总数据均内嵌，不需要联网、Python 服务或数据库连接。文件约 11MB，浏览器直接打开 `file://` 即可使用。

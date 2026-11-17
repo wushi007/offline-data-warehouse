@@ -211,7 +211,7 @@ OK 留存不变量（D+n 人数 ≤ D0）: 0 天违规
 
 ![电商分析看板：经营概览、每日趋势、品牌排名与每日明细](docs/assets/ecommerce-dashboard.png)
 
-**[下载看板 HTML](https://github.com/wushi007/offline-data-warehouse/raw/refs/heads/main/dashboards/trade_funnel_dashboard.html)**，保存后用浏览器打开。图表、字体和汇总数据均内嵌在约 11MB 的单文件中，不联网、不连接数据库；GitHub 文件页只显示源码。
+**[下载看板 HTML](https://github.com/wushi007/offline-data-warehouse/raw/refs/heads/main/dashboards/ecommerce_dashboard.html)**，保存后用浏览器打开。图表、字体和汇总数据均内嵌在约 11MB 的单文件中，不联网、不连接数据库；GitHub 文件页只显示源码。
 
 看板是 2019-10-01～11-30 的静态聚合快照，不会实时刷新，数据来自源数据的聚合结果而不是 ADS 表的在线查询。金额是购买记录金额，不是业务系统订单数或销量，币种未确认；用户和会话键按所选窗口独立去重，每日或每月数值不能直接相加。11-15 未观察到购买日志，严格漏斗口径与源数据中已有的漏斗倒挂需要结合顶部数据说明阅读。具体口径见 [看板说明](dashboards/README.md)。
 
